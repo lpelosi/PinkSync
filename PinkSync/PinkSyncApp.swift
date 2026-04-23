@@ -1,17 +1,20 @@
-//
-//  PinkSyncApp.swift
-//  PinkSync
-//
-//  Created by Louis Pelosi on 4/23/26.
-//
-
 import SwiftUI
+import SwiftData
 
 @main
 struct PinkSyncApp: App {
     var body: some Scene {
         WindowGroup {
-            ContentView()
+            MainTabView()
         }
+        .modelContainer(for: [
+            Team.self,
+            Player.self,
+            Game.self,
+            GamePlayerStats.self,
+            GameGoalieStats.self,
+            ShootoutRound.self,
+            OpponentTeam.self
+        ])
     }
 }
