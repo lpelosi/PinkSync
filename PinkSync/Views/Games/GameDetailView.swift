@@ -1,5 +1,6 @@
 import SwiftUI
 import SwiftData
+import UIKit
 
 struct GameDetailView: View {
     @Bindable var game: Game
@@ -12,6 +13,9 @@ struct GameDetailView: View {
     @State private var isSending = false
     @State private var showingGoaliePicker = false
     @State private var showingSummary = false
+    @State private var showingLiveCheckIn = false
+    @State private var liveVM: LiveGameViewModel?
+    @State private var pendingCheckedIn: [Player]?
 
     private var goalies: [Player] {
         allPlayers.filter { $0.isGoalie }
@@ -62,7 +66,6 @@ struct GameDetailView: View {
                     NavigationLink {
                         GoalieStatsView(
                             player: goalie,
-                            stats: goalieStats(for: goalie),
                             game: game
                         )
                     } label: {
@@ -87,6 +90,23 @@ struct GameDetailView: View {
                     }
                     .foregroundStyle(AppTheme.pink)
                 }
+            }
+
+            // MARK: - Go Live
+            Section {
+                Button {
+                    showingLiveCheckIn = true
+                } label: {
+                    HStack {
+                        Spacer()
+                        Label("Go Live", systemImage: "record.circle")
+                            .font(.headline)
+                        Spacer()
+                    }
+                    .padding(.vertical, 8)
+                }
+                .listRowBackground(AppTheme.teal)
+                .foregroundStyle(.white)
             }
 
             // MARK: - Skaters
@@ -170,6 +190,27 @@ struct GameDetailView: View {
                 GameSummaryView(game: game)
             }
         }
+        .sheet(isPresented: $showingLiveCheckIn, onDismiss: {
+            if let players = pendingCheckedIn {
+                pendingCheckedIn = nil
+                let vm = LiveGameViewModel(game: game, modelContext: modelContext)
+                vm.checkedInPlayers = players
+                liveVM = vm
+            }
+        }) {
+            LineupCheckInView(
+                game: game,
+                allPlayers: allPlayers.filter { $0.isActive }
+            ) { checkedIn in
+                pendingCheckedIn = checkedIn
+                showingLiveCheckIn = false
+            }
+        }
+        .fullScreenCover(item: $liveVM) { vm in
+            LiveGameView(vm: vm) {
+                liveVM = nil
+            }
+        }
     }
 
     // MARK: - Helpers
@@ -187,15 +228,30 @@ struct GameDetailView: View {
         game.isComplete = true
         try? modelContext.save()
 
+        // Ensure a goalie stat record exists for the starting goalie
+        if let goalie = game.startingGoalie,
+           !game.goalieStats.contains(where: { $0.player?.persistentModelID == goalie.persistentModelID }) {
+            let gs = GameGoalieStats()
+            gs.player = goalie
+            game.goalieStats.append(gs)
+            modelContext.insert(gs)
+            try? modelContext.save()
+        }
+
         do {
             try await APIClient.sendGameStats(game: game)
             game.isSynced = true
             try? modelContext.save()
 
-            // Upload opponent logo if we have one
-            if let opponentTeam = savedTeams.first(where: { $0.name == game.opponent }),
-               let logoData = opponentTeam.logoData {
-                await APIClient.sendTeamLogo(teamName: game.opponent, logoData: logoData)
+            // Upload opponent logo if we have one (user photo or asset catalog)
+            if let opponentTeam = savedTeams.first(where: { $0.name == game.opponent }) {
+                if let logoData = opponentTeam.logoData {
+                    await APIClient.sendTeamLogo(teamName: game.opponent, logoData: logoData)
+                } else if let asset = opponentTeam.logoAsset,
+                          let uiImage = UIImage(named: asset),
+                          let pngData = uiImage.pngData() {
+                    await APIClient.sendTeamLogo(teamName: game.opponent, logoData: pngData)
+                }
             }
         } catch {
             sendError = error.localizedDescription

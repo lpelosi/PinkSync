@@ -7,11 +7,30 @@ struct PlayerDetailView: View {
     var body: some View {
         List {
             Section {
-                HStack {
-                    Text(player.displayNumber)
-                        .font(.system(size: 40, weight: .bold, design: .monospaced))
-                        .foregroundStyle(AppTheme.pink)
-                    VStack(alignment: .leading) {
+                HStack(spacing: 16) {
+                    if let photoURL = player.photoURL {
+                        AsyncImage(url: photoURL) { image in
+                            image
+                                .resizable()
+                                .scaledToFill()
+                        } placeholder: {
+                            Image(systemName: "person.circle.fill")
+                                .resizable()
+                                .foregroundStyle(.secondary)
+                        }
+                        .frame(width: 80, height: 80)
+                        .clipShape(Circle())
+                    } else {
+                        Image(systemName: "person.circle.fill")
+                            .resizable()
+                            .foregroundStyle(.secondary)
+                            .frame(width: 80, height: 80)
+                    }
+
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(player.displayNumber)
+                            .font(.system(size: 32, weight: .bold, design: .monospaced))
+                            .foregroundStyle(AppTheme.pink)
                         Text(player.name)
                             .font(.title2.bold())
                         Text(player.position)

@@ -3,6 +3,9 @@ import SwiftData
 
 @Model
 final class Game {
+    /// Stable identifier for server upsert — generated once at creation, never changes.
+    /// Default "" allows lightweight migration for existing games; the server falls back to date+opponent.
+    var gameId: String = ""
     var date: Date
     var opponent: String
     var location: String
@@ -31,6 +34,7 @@ final class Game {
         isComplete: Bool = false,
         isSynced: Bool = false
     ) {
+        self.gameId = UUID().uuidString
         self.date = date
         self.opponent = opponent
         self.location = location

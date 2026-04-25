@@ -3,11 +3,25 @@ import SwiftData
 
 @Model
 final class Player {
+    /// Stable identifier used for matching across iOS app, server, and website.
+    /// Default "" allows lightweight migration for existing players.
+    var playerId: String = ""
+
     var name: String
     var number: Int
     var position: String
     var isGoalie: Bool
     var isActive: Bool
+
+    /// Server URL path for the player photo (e.g., "/img/players/uuid.jpg").
+    /// Optional with nil default for lightweight SwiftData migration.
+    var photoPath: String? = nil
+
+    /// Full URL for the player photo, constructed from the server base URL.
+    var photoURL: URL? {
+        guard let photoPath else { return nil }
+        return URL(string: Secrets.baseURL + photoPath)
+    }
 
     var team: Team?
 

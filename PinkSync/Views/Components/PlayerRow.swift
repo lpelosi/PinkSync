@@ -5,6 +5,26 @@ struct PlayerRow: View {
 
     var body: some View {
         HStack(spacing: 12) {
+            // Player photo thumbnail
+            if let photoURL = player.photoURL {
+                AsyncImage(url: photoURL) { image in
+                    image
+                        .resizable()
+                        .scaledToFill()
+                } placeholder: {
+                    Image(systemName: "person.circle.fill")
+                        .resizable()
+                        .foregroundStyle(.tertiary)
+                }
+                .frame(width: 32, height: 32)
+                .clipShape(Circle())
+            } else {
+                Image(systemName: "person.circle.fill")
+                    .resizable()
+                    .foregroundStyle(.tertiary)
+                    .frame(width: 32, height: 32)
+            }
+
             Text(player.displayNumber)
                 .font(.system(size: 16, weight: .bold, design: .monospaced))
                 .foregroundStyle(AppTheme.pink)

@@ -27,6 +27,7 @@ final class OpponentTeam {
         SeedInfo(name: "Dangleberry Puckhounds", logoAsset: "puckhounds"),
         SeedInfo(name: "Whiskey Tangos", logoAsset: "tangos"),
         SeedInfo(name: "Otterhawks", logoAsset: "otterhawks"),
+        SeedInfo(name: "District 5", logoAsset: "d5"),
         SeedInfo(name: "Frozen Flamingos", logoAsset: "flamingos_emblem"),
     ]
 }

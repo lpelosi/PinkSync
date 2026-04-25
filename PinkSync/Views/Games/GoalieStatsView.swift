@@ -3,15 +3,14 @@ import SwiftData
 
 struct GoalieStatsView: View {
     let player: Player
-    let stats: GameGoalieStats?
     let game: Game
 
     @Environment(\.modelContext) private var modelContext
     @Environment(\.horizontalSizeClass) private var sizeClass
 
+    @State private var resolvedStats: GameGoalieStats?
     @State private var shotsAgainst: Int = 0
     @State private var goalsAgainst: Int = 0
-    @State private var result: String = GameResult.win.rawValue
 
     private var saves: Int { shotsAgainst - goalsAgainst }
     private var savePercentage: Double {
@@ -19,8 +18,9 @@ struct GoalieStatsView: View {
         return Double(saves) / Double(shotsAgainst)
     }
 
+    /// Result is derived from the game — single source of truth.
     private var currentResult: GameResult? {
-        GameResult(rawValue: result)
+        game.gameResult
     }
 
     private var columns: [GridItem] {
@@ -67,71 +67,63 @@ struct GoalieStatsView: View {
                 }
                 .padding()
 
-                // Result picker
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("RESULT")
-                        .font(AppTheme.statLabel)
-                        .foregroundStyle(.secondary)
-                        .padding(.horizontal)
-
-                    Picker("Result", selection: $result) {
-                        ForEach(GameResult.allCases) { r in
-                            Text(r.displayName).tag(r.rawValue)
-                        }
+                // Result display (derived from game-level result)
+                if let gameResult = currentResult {
+                    VStack(spacing: 4) {
+                        Text("GAME RESULT")
+                            .font(AppTheme.statLabel)
+                            .foregroundStyle(.secondary)
+                        Text(gameResult.displayName)
+                            .font(.title2.bold())
+                            .foregroundStyle(gameResult.isWin ? .green : .red)
                     }
-                    .pickerStyle(.segmented)
-                    .padding(.horizontal)
+                    .padding()
+                } else {
+                    Text("Set game result in the Score section")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .padding()
                 }
 
                 // Shootout section
-                if currentResult?.isShootout == true {
-                    ShootoutView(goalieStats: resolveOrCreateStats())
+                if currentResult?.isShootout == true, let gs = resolvedStats {
+                    ShootoutView(goalieStats: gs)
                         .padding(.horizontal)
                 }
             }
         }
         .navigationTitle(player.name)
-        .onAppear { loadStats() }
+        .onAppear { resolveAndLoad() }
         .onDisappear { saveStats() }
     }
 
-    private func loadStats() {
-        guard let stats else { return }
-        shotsAgainst = stats.shotsAgainst
-        goalsAgainst = stats.goalsAgainst
-        result = stats.result
+    /// Find existing goalie stats for this player+game, or create a new record.
+    private func resolveAndLoad() {
+        if let existing = game.goalieStats.first(where: {
+            $0.player?.persistentModelID == player.persistentModelID
+        }) {
+            resolvedStats = existing
+            shotsAgainst = existing.shotsAgainst
+            goalsAgainst = existing.goalsAgainst
+        } else {
+            let newStats = GameGoalieStats(
+                shotsAgainst: 0,
+                goalsAgainst: 0,
+                result: game.result
+            )
+            newStats.player = player
+            game.goalieStats.append(newStats)
+            modelContext.insert(newStats)
+            try? modelContext.save()
+            resolvedStats = newStats
+        }
     }
 
     private func saveStats() {
-        if let stats {
-            stats.shotsAgainst = shotsAgainst
-            stats.goalsAgainst = goalsAgainst
-            stats.result = result
-        } else if shotsAgainst > 0 || goalsAgainst > 0 {
-            let newStats = GameGoalieStats(
-                shotsAgainst: shotsAgainst,
-                goalsAgainst: goalsAgainst,
-                result: result
-            )
-            newStats.player = player
-            newStats.game = game
-            modelContext.insert(newStats)
-        }
+        guard let resolvedStats else { return }
+        resolvedStats.shotsAgainst = shotsAgainst
+        resolvedStats.goalsAgainst = goalsAgainst
+        resolvedStats.result = game.result
         try? modelContext.save()
-    }
-
-    private func resolveOrCreateStats() -> GameGoalieStats {
-        if let stats { return stats }
-
-        let newStats = GameGoalieStats(
-            shotsAgainst: shotsAgainst,
-            goalsAgainst: goalsAgainst,
-            result: result
-        )
-        newStats.player = player
-        newStats.game = game
-        modelContext.insert(newStats)
-        try? modelContext.save()
-        return newStats
     }
 }
