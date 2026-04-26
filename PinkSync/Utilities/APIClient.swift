@@ -1,9 +1,245 @@
 import Foundation
 import UIKit
+import os
+
+private let logger = Logger(subsystem: "PinkSync", category: "APIClient")
 
 enum APIClient {
     static var baseURL = Secrets.baseURL
-    static let apiKey = Secrets.apiKey
+    static var authManager: AuthManager?
+
+    // MARK: - Authorized Request Builder
+
+    private static func authorizedRequest(url: URL, method: String = "GET") async throws -> URLRequest {
+        var request = URLRequest(url: url)
+        request.httpMethod = method
+        if let manager = authManager {
+            let token = try await manager.refreshTokenIfNeeded()
+            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        }
+        if method != "GET" && method != "HEAD" {
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        }
+        return request
+    }
+
+    // MARK: - Auth API
+
+    struct LoginResponse: Decodable {
+        let success: Bool
+        let accessToken: String
+        let refreshToken: String
+        let user: AuthUser
+    }
+
+    struct RefreshResponse: Decodable {
+        let success: Bool
+        let accessToken: String
+        let refreshToken: String
+        let user: AuthUser
+    }
+
+    static func login(email: String, password: String) async throws -> LoginResponse {
+        guard let url = URL(string: "\(baseURL)/api/auth/login") else {
+            throw URLError(.badURL)
+        }
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+
+        let payload = ["email": email, "password": password]
+        request.httpBody = try JSONSerialization.data(withJSONObject: payload)
+
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse else {
+            throw URLError(.badServerResponse)
+        }
+        if http.statusCode == 401 {
+            let body = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+            let message = body?["message"] as? String ?? "Invalid email or password"
+            throw AuthAPIError.invalidCredentials(message)
+        }
+        guard (200...299).contains(http.statusCode) else {
+            throw URLError(.badServerResponse)
+        }
+        return try JSONDecoder().decode(LoginResponse.self, from: data)
+    }
+
+    static func refreshToken(refreshToken: String) async throws -> RefreshResponse {
+        guard let url = URL(string: "\(baseURL)/api/auth/refresh") else {
+            throw URLError(.badURL)
+        }
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+
+        let payload = ["refreshToken": refreshToken]
+        request.httpBody = try JSONSerialization.data(withJSONObject: payload)
+
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse,
+              (200...299).contains(http.statusCode) else {
+            throw URLError(.badServerResponse)
+        }
+        return try JSONDecoder().decode(RefreshResponse.self, from: data)
+    }
+
+    static func logout(refreshToken: String) async throws {
+        guard let url = URL(string: "\(baseURL)/api/auth/logout") else { return }
+        var request = try await authorizedRequest(url: url, method: "POST")
+        let payload = ["refreshToken": refreshToken]
+        request.httpBody = try JSONSerialization.data(withJSONObject: payload)
+        _ = try? await URLSession.shared.data(for: request)
+    }
+
+    static func register(email: String, displayName: String, password: String) async throws -> LoginResponse {
+        guard let url = URL(string: "\(baseURL)/api/auth/register") else {
+            throw URLError(.badURL)
+        }
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+
+        let payload: [String: String] = ["email": email, "displayName": displayName, "password": password]
+        request.httpBody = try JSONSerialization.data(withJSONObject: payload)
+
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse else {
+            throw URLError(.badServerResponse)
+        }
+        if !(200...299).contains(http.statusCode) {
+            let body = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+            let message = body?["message"] as? String ?? "Registration failed"
+            throw AuthAPIError.registrationFailed(message)
+        }
+        return try JSONDecoder().decode(LoginResponse.self, from: data)
+    }
+
+    static func appleSignIn(identityToken: String, fullName: PersonNameComponents?, email: String?) async throws -> LoginResponse {
+        guard let url = URL(string: "\(baseURL)/api/auth/apple") else {
+            throw URLError(.badURL)
+        }
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+
+        var payload: [String: Any] = ["identityToken": identityToken]
+        if let email { payload["email"] = email }
+        if let givenName = fullName?.givenName, let familyName = fullName?.familyName {
+            payload["fullName"] = ["givenName": givenName, "familyName": familyName]
+        }
+        request.httpBody = try JSONSerialization.data(withJSONObject: payload)
+
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse else {
+            throw URLError(.badServerResponse)
+        }
+        if !(200...299).contains(http.statusCode) {
+            let body = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+            let message = body?["message"] as? String ?? "Apple sign-in failed"
+            throw AuthAPIError.registrationFailed(message)
+        }
+        return try JSONDecoder().decode(LoginResponse.self, from: data)
+    }
+
+    enum AuthAPIError: LocalizedError {
+        case invalidCredentials(String)
+        case registrationFailed(String)
+        var errorDescription: String? {
+            switch self {
+            case .invalidCredentials(let message): return message
+            case .registrationFailed(let message): return message
+            }
+        }
+    }
+
+    // MARK: - User Management API
+
+    struct UserResponse: Decodable, Identifiable {
+        let userId: String
+        let email: String
+        let displayName: String
+        let role: UserRole
+        let isActive: Bool
+        let createdAt: String?
+
+        var id: String { userId }
+    }
+
+    struct UsersListResponse: Decodable {
+        let success: Bool
+        let users: [UserResponse]
+    }
+
+    struct CreateUserResponse: Decodable {
+        let success: Bool
+        let user: UserResponse
+    }
+
+    static func fetchUsers() async throws -> [UserResponse] {
+        guard let url = URL(string: "\(baseURL)/api/users") else {
+            throw URLError(.badURL)
+        }
+        let request = try await authorizedRequest(url: url)
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse,
+              (200...299).contains(http.statusCode) else {
+            throw URLError(.badServerResponse)
+        }
+        let result = try JSONDecoder().decode(UsersListResponse.self, from: data)
+        return result.users
+    }
+
+    static func createUser(email: String, displayName: String, password: String, role: UserRole) async throws -> UserResponse {
+        guard let url = URL(string: "\(baseURL)/api/users") else {
+            throw URLError(.badURL)
+        }
+        var request = try await authorizedRequest(url: url, method: "POST")
+        let payload: [String: String] = [
+            "email": email,
+            "displayName": displayName,
+            "password": password,
+            "role": role.rawValue
+        ]
+        request.httpBody = try JSONSerialization.data(withJSONObject: payload)
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse,
+              (200...299).contains(http.statusCode) else {
+            throw URLError(.badServerResponse)
+        }
+        let result = try JSONDecoder().decode(CreateUserResponse.self, from: data)
+        return result.user
+    }
+
+    static func updateUser(userId: String, displayName: String? = nil, role: UserRole? = nil, isActive: Bool? = nil, password: String? = nil) async throws {
+        guard let url = URL(string: "\(baseURL)/api/users/\(userId)") else {
+            throw URLError(.badURL)
+        }
+        var request = try await authorizedRequest(url: url, method: "PUT")
+        var payload: [String: Any] = [:]
+        if let displayName { payload["displayName"] = displayName }
+        if let role { payload["role"] = role.rawValue }
+        if let isActive { payload["isActive"] = isActive }
+        if let password { payload["password"] = password }
+        request.httpBody = try JSONSerialization.data(withJSONObject: payload)
+        let (_, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse,
+              (200...299).contains(http.statusCode) else {
+            throw URLError(.badServerResponse)
+        }
+    }
+
+    static func deleteUser(userId: String) async throws {
+        guard let url = URL(string: "\(baseURL)/api/users/\(userId)") else {
+            throw URLError(.badURL)
+        }
+        let request = try await authorizedRequest(url: url, method: "DELETE")
+        let (_, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse,
+              (200...299).contains(http.statusCode) else {
+            throw URLError(.badServerResponse)
+        }
+    }
 
     struct StartingGoaliePayload: Encodable {
         let playerId: String
@@ -83,11 +319,10 @@ enum APIClient {
             throw ValidationError.negativeScore
         }
 
-        let url = URL(string: "\(baseURL)/api/game-stats")!
-        var request = URLRequest(url: url)
-        request.httpMethod = "POST"
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.setValue(apiKey, forHTTPHeaderField: "X-API-Key")
+        guard let url = URL(string: "\(baseURL)/api/game-stats") else {
+            throw URLError(.badURL)
+        }
+        var request = try await authorizedRequest(url: url, method: "POST")
 
         let dateFormatter = ISO8601DateFormatter()
 
@@ -198,24 +433,20 @@ enum APIClient {
     static func sendTeamLogo(teamName: String, logoData: Data) async {
         guard let compressed = compressLogo(logoData) else { return }
         guard let url = URL(string: "\(baseURL)/api/team-logo") else { return }
-        var request = URLRequest(url: url)
-        request.httpMethod = "POST"
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.setValue(apiKey, forHTTPHeaderField: "X-API-Key")
-
-        let payload = TeamLogoPayload(
-            teamName: teamName,
-            logoBase64: compressed.base64EncodedString()
-        )
 
         do {
+            var request = try await authorizedRequest(url: url, method: "POST")
+            let payload = TeamLogoPayload(
+                teamName: teamName,
+                logoBase64: compressed.base64EncodedString()
+            )
             request.httpBody = try JSONEncoder().encode(payload)
             let (_, response) = try await URLSession.shared.data(for: request)
             if let http = response as? HTTPURLResponse, !(200...299).contains(http.statusCode) {
-                print("Team logo upload failed: HTTP \(http.statusCode)")
+                logger.warning("Team logo upload failed: HTTP \(http.statusCode)")
             }
         } catch {
-            print("Team logo upload error: \(error.localizedDescription)")
+            logger.error("Team logo upload error: \(error.localizedDescription)")
         }
     }
 
@@ -223,9 +454,7 @@ enum APIClient {
     static func deleteGameFromServer(gameId: String) async throws {
         guard !gameId.isEmpty else { return }
         guard let url = URL(string: "\(baseURL)/api/game/\(gameId)") else { return }
-        var request = URLRequest(url: url)
-        request.httpMethod = "DELETE"
-        request.setValue(apiKey, forHTTPHeaderField: "X-API-Key")
+        let request = try await authorizedRequest(url: url, method: "DELETE")
 
         let (_, response) = try await URLSession.shared.data(for: request)
 
@@ -262,8 +491,7 @@ enum APIClient {
         guard let url = URL(string: "\(baseURL)/api/roster") else {
             throw URLError(.badURL)
         }
-        var request = URLRequest(url: url)
-        request.setValue(apiKey, forHTTPHeaderField: "X-API-Key")
+        let request = try await authorizedRequest(url: url)
 
         let (data, response) = try await URLSession.shared.data(for: request)
         guard let http = response as? HTTPURLResponse,
@@ -278,10 +506,7 @@ enum APIClient {
         guard let url = URL(string: "\(baseURL)/api/roster") else {
             throw URLError(.badURL)
         }
-        var request = URLRequest(url: url)
-        request.httpMethod = "PUT"
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.setValue(apiKey, forHTTPHeaderField: "X-API-Key")
+        var request = try await authorizedRequest(url: url, method: "PUT")
 
         let payload = players.map { player in
             RosterPlayerPayload(
@@ -316,10 +541,7 @@ enum APIClient {
         guard let url = URL(string: "\(baseURL)/api/player-photo") else {
             throw URLError(.badURL)
         }
-        var request = URLRequest(url: url)
-        request.httpMethod = "POST"
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.setValue(apiKey, forHTTPHeaderField: "X-API-Key")
+        var request = try await authorizedRequest(url: url, method: "POST")
 
         let payload: [String: String] = [
             "playerId": playerId,
@@ -372,8 +594,7 @@ enum APIClient {
         guard let url = URL(string: "\(baseURL)/api/schedule") else {
             throw URLError(.badURL)
         }
-        var request = URLRequest(url: url)
-        request.setValue(apiKey, forHTTPHeaderField: "X-API-Key")
+        let request = try await authorizedRequest(url: url)
 
         let (data, response) = try await URLSession.shared.data(for: request)
         guard let http = response as? HTTPURLResponse,
@@ -387,10 +608,7 @@ enum APIClient {
         guard let url = URL(string: "\(baseURL)/api/schedule") else {
             throw URLError(.badURL)
         }
-        var request = URLRequest(url: url)
-        request.httpMethod = "POST"
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.setValue(apiKey, forHTTPHeaderField: "X-API-Key")
+        var request = try await authorizedRequest(url: url, method: "POST")
 
         let payload = ScheduleEntryPayload(date: date, opponent: opponent, location: location, time: time)
         request.httpBody = try JSONEncoder().encode(payload)
@@ -409,9 +627,7 @@ enum APIClient {
         guard let url = URL(string: "\(baseURL)/api/schedule/\(id)") else {
             throw URLError(.badURL)
         }
-        var request = URLRequest(url: url)
-        request.httpMethod = "DELETE"
-        request.setValue(apiKey, forHTTPHeaderField: "X-API-Key")
+        let request = try await authorizedRequest(url: url, method: "DELETE")
 
         let (_, response) = try await URLSession.shared.data(for: request)
         guard let http = response as? HTTPURLResponse,
@@ -474,8 +690,7 @@ enum APIClient {
         guard let url = URL(string: "\(baseURL)/api/games") else {
             throw URLError(.badURL)
         }
-        var request = URLRequest(url: url)
-        request.setValue(apiKey, forHTTPHeaderField: "X-API-Key")
+        let request = try await authorizedRequest(url: url)
 
         let (data, response) = try await URLSession.shared.data(for: request)
         guard let http = response as? HTTPURLResponse,

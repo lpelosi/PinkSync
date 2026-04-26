@@ -1,13 +1,10 @@
 import SwiftUI
 import SwiftData
-import LocalAuthentication
 
 struct AdminView: View {
     @Environment(\.modelContext) private var modelContext
+    @Environment(AuthManager.self) private var authManager
     @Query(sort: \Game.date, order: .reverse) private var games: [Game]
-
-    @State private var isUnlocked = false
-    @State private var authError: String?
 
     @State private var showDeleteAllConfirmation = false
     @State private var showDeleteSingleConfirmation = false
@@ -20,55 +17,11 @@ struct AdminView: View {
     @State private var showDeleteError = false
     @State private var deleteError: String?
 
+    @State private var showUserManagement = false
+
     var body: some View {
-        Group {
-            if isUnlocked {
-                adminContent
-            } else {
-                lockScreen
-            }
-        }
-        .navigationTitle("Admin")
-        .onDisappear { isUnlocked = false }
-    }
-
-    // MARK: - Lock Screen
-
-    private var lockScreen: some View {
-        VStack(spacing: 24) {
-            Spacer()
-
-            Image(systemName: "lock.shield")
-                .font(.system(size: 64))
-                .foregroundStyle(AppTheme.pink)
-
-            Text("Admin Access")
-                .font(.title2.bold())
-
-            Text("Authenticate to manage game data")
-                .foregroundStyle(.secondary)
-                .font(.subheadline)
-
-            Button {
-                authenticate()
-            } label: {
-                Label("Unlock", systemImage: "faceid")
-                    .font(.headline)
-                    .padding(.horizontal, 32)
-                    .padding(.vertical, 12)
-            }
-            .buttonStyle(.borderedProminent)
-            .tint(AppTheme.pink)
-
-            if let authError {
-                Text(authError)
-                    .foregroundStyle(.red)
-                    .font(.caption)
-            }
-
-            Spacer()
-        }
-        .padding()
+        adminContent
+            .navigationTitle("Admin")
     }
 
     // MARK: - Admin Content
@@ -130,6 +83,40 @@ struct AdminView: View {
                 }
             }
 
+            // User Management
+            Section {
+                NavigationLink {
+                    UserManagementView()
+                } label: {
+                    Label("Manage Users", systemImage: "person.badge.key")
+                }
+            } header: {
+                Text("Users")
+            }
+
+            // Signed-In User
+            if let user = authManager.currentUser {
+                Section {
+                    HStack {
+                        Text("Signed in as")
+                        Spacer()
+                        Text(user.displayName)
+                            .foregroundStyle(.secondary)
+                    }
+                    HStack {
+                        Text("Role")
+                        Spacer()
+                        Text(user.role.displayName)
+                            .foregroundStyle(.secondary)
+                    }
+                    Button("Sign Out", role: .destructive) {
+                        authManager.logout()
+                    }
+                } header: {
+                    Text("Account")
+                }
+            }
+
             // Delete All
             Section {
                 Button(role: .destructive) {
@@ -187,31 +174,6 @@ struct AdminView: View {
             Button("OK") {}
         } message: {
             Text(deleteError ?? "An error occurred.")
-        }
-    }
-
-    // MARK: - Authentication
-
-    private func authenticate() {
-        let context = LAContext()
-        var error: NSError?
-
-        if context.canEvaluatePolicy(.deviceOwnerAuthentication, error: &error) {
-            context.evaluatePolicy(
-                .deviceOwnerAuthentication,
-                localizedReason: "Authenticate to access admin settings"
-            ) { success, authenticationError in
-                DispatchQueue.main.async {
-                    if success {
-                        isUnlocked = true
-                        authError = nil
-                    } else {
-                        authError = authenticationError?.localizedDescription
-                    }
-                }
-            }
-        } else {
-            authError = error?.localizedDescription ?? "Authentication not available"
         }
     }
 

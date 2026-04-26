@@ -2,6 +2,7 @@ import SwiftUI
 
 struct PlayerDetailView: View {
     let player: Player
+    @Environment(AuthManager.self) private var authManager
     @State private var showingEdit = false
 
     var body: some View {
@@ -70,8 +71,10 @@ struct PlayerDetailView: View {
         }
         .navigationTitle(player.name)
         .toolbar {
-            Button("Edit") {
-                showingEdit = true
+            if authManager.canEditRoster || authManager.canUploadPhotos {
+                Button("Edit") {
+                    showingEdit = true
+                }
             }
         }
         .sheet(isPresented: $showingEdit) {

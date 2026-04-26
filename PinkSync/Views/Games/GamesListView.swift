@@ -9,6 +9,7 @@ struct GamesListView: View {
     @Query(sort: \Player.number) private var players: [Player]
     @Query(sort: \OpponentTeam.name) private var savedTeams: [OpponentTeam]
     @Environment(\.modelContext) private var modelContext
+    @Environment(AuthManager.self) private var authManager
     @State private var showingAddGame = false
     @State private var showingAddBout = false
     @State private var gameToDelete: Game?
@@ -66,16 +67,20 @@ struct GamesListView: View {
                 Section("Upcoming") {
                     ForEach(schedule) { entry in
                         Button {
-                            createGameFromBout(entry)
+                            if authManager.canManageGames {
+                                createGameFromBout(entry)
+                            }
                         } label: {
                             boutRow(entry)
                         }
                         .tint(.primary)
                         .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                            Button(role: .destructive) {
-                                boutToDelete = entry
-                            } label: {
-                                Label("Delete", systemImage: "trash")
+                            if authManager.canManageSchedule {
+                                Button(role: .destructive) {
+                                    boutToDelete = entry
+                                } label: {
+                                    Label("Delete", systemImage: "trash")
+                                }
                             }
                         }
                     }
@@ -106,10 +111,12 @@ struct GamesListView: View {
                             gameRow(game)
                         }
                         .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                            Button(role: .destructive) {
-                                gameToDelete = game
-                            } label: {
-                                Label("Delete", systemImage: "trash")
+                            if authManager.canManageGames {
+                                Button(role: .destructive) {
+                                    gameToDelete = game
+                                } label: {
+                                    Label("Delete", systemImage: "trash")
+                                }
                             }
                         }
                     }
@@ -124,20 +131,26 @@ struct GamesListView: View {
             GameDetailView(game: game)
         }
         .toolbar {
-            ToolbarItem(placement: .primaryAction) {
-                Menu {
-                    Button {
-                        showingAddGame = true
+            if authManager.canManageGames || authManager.canManageSchedule {
+                ToolbarItem(placement: .primaryAction) {
+                    Menu {
+                        if authManager.canManageGames {
+                            Button {
+                                showingAddGame = true
+                            } label: {
+                                Label("New Game", systemImage: "hockey.puck")
+                            }
+                        }
+                        if authManager.canManageSchedule {
+                            Button {
+                                showingAddBout = true
+                            } label: {
+                                Label("Schedule Bout", systemImage: "calendar.badge.plus")
+                            }
+                        }
                     } label: {
-                        Label("New Game", systemImage: "hockey.puck")
+                        Image(systemName: "plus")
                     }
-                    Button {
-                        showingAddBout = true
-                    } label: {
-                        Label("Schedule Bout", systemImage: "calendar.badge.plus")
-                    }
-                } label: {
-                    Image(systemName: "plus")
                 }
             }
         }

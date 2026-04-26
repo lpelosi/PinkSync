@@ -5,6 +5,7 @@ import UIKit
 struct GameDetailView: View {
     @Bindable var game: Game
     @Environment(\.modelContext) private var modelContext
+    @Environment(AuthManager.self) private var authManager
     @Query(sort: \Player.number) private var allPlayers: [Player]
     @Query private var savedTeams: [OpponentTeam]
 
@@ -49,13 +50,30 @@ struct GameDetailView: View {
 
             // MARK: - Score & Result
             Section("Score") {
-                Stepper("Goals For: \(game.goalsFor)", value: $game.goalsFor, in: 0...99)
-                Stepper("Goals Against: \(game.goalsAgainst)", value: $game.goalsAgainst, in: 0...99)
+                if authManager.canManageGames {
+                    Stepper("Goals For: \(game.goalsFor)", value: $game.goalsFor, in: 0...99)
+                    Stepper("Goals Against: \(game.goalsAgainst)", value: $game.goalsAgainst, in: 0...99)
 
-                Picker("Result", selection: $game.result) {
-                    Text("None").tag("")
-                    ForEach(GameResult.allCases) { result in
-                        Text(result.displayName).tag(result.rawValue)
+                    Picker("Result", selection: $game.result) {
+                        Text("None").tag("")
+                        ForEach(GameResult.allCases) { result in
+                            Text(result.displayName).tag(result.rawValue)
+                        }
+                    }
+                } else {
+                    HStack {
+                        Text("Score")
+                        Spacer()
+                        Text(game.scoreDisplay)
+                            .foregroundStyle(.secondary)
+                    }
+                    if let result = game.gameResult {
+                        HStack {
+                            Text("Result")
+                            Spacer()
+                            Text(result.displayName)
+                                .foregroundStyle(.secondary)
+                        }
                     }
                 }
             }
@@ -93,20 +111,22 @@ struct GameDetailView: View {
             }
 
             // MARK: - Go Live
-            Section {
-                Button {
-                    showingLiveCheckIn = true
-                } label: {
-                    HStack {
-                        Spacer()
-                        Label("Go Live", systemImage: "record.circle")
-                            .font(.headline)
-                        Spacer()
+            if authManager.canManageGames {
+                Section {
+                    Button {
+                        showingLiveCheckIn = true
+                    } label: {
+                        HStack {
+                            Spacer()
+                            Label("Go Live", systemImage: "record.circle")
+                                .font(.headline)
+                            Spacer()
+                        }
+                        .padding(.vertical, 8)
                     }
-                    .padding(.vertical, 8)
+                    .listRowBackground(AppTheme.teal)
+                    .foregroundStyle(.white)
                 }
-                .listRowBackground(AppTheme.teal)
-                .foregroundStyle(.white)
             }
 
             // MARK: - Skaters
@@ -145,26 +165,28 @@ struct GameDetailView: View {
             }
 
             // MARK: - Save & Send
-            Section {
-                Button {
-                    Task { await sendStats() }
-                } label: {
-                    HStack {
-                        Spacer()
-                        if isSending {
-                            ProgressView()
-                                .tint(.white)
-                        } else {
-                            Text(game.isSynced ? "Re-Send Stats" : "Save & Send")
-                                .font(.headline)
+            if authManager.canManageGames {
+                Section {
+                    Button {
+                        Task { await sendStats() }
+                    } label: {
+                        HStack {
+                            Spacer()
+                            if isSending {
+                                ProgressView()
+                                    .tint(.white)
+                            } else {
+                                Text(game.isSynced ? "Re-Send Stats" : "Save & Send")
+                                    .font(.headline)
+                            }
+                            Spacer()
                         }
-                        Spacer()
+                        .padding(.vertical, 8)
                     }
-                    .padding(.vertical, 8)
+                    .listRowBackground(AppTheme.pink)
+                    .foregroundStyle(.white)
+                    .disabled(isSending)
                 }
-                .listRowBackground(AppTheme.pink)
-                .foregroundStyle(.white)
-                .disabled(isSending)
             }
 
             if game.isSynced {

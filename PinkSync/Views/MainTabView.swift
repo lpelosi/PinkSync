@@ -6,6 +6,7 @@ private let launchLogger = Logger(subsystem: "PinkSync", category: "Launch")
 
 struct MainTabView: View {
     @Environment(\.modelContext) private var modelContext
+    @Environment(AuthManager.self) private var authManager
     @State private var selectedTab = 0
 
     var body: some View {
@@ -40,10 +41,20 @@ struct MainTabView: View {
                 }
             }
 
-            Tab("Admin", systemImage: "gearshape", value: 4) {
+            if authManager.canManageUsers {
+                Tab("Admin", systemImage: "gearshape", value: 4) {
+                    LazyTabContent {
+                        NavigationStack {
+                            AdminView()
+                        }
+                    }
+                }
+            }
+
+            Tab("Profile", systemImage: "person.circle", value: 5) {
                 LazyTabContent {
                     NavigationStack {
-                        AdminView()
+                        ProfileView()
                     }
                 }
             }
@@ -52,7 +63,7 @@ struct MainTabView: View {
         .task {
             let start = CFAbsoluteTimeGetCurrent()
             RosterSeeder.seedIfNeeded(modelContext: modelContext)
-            launchLogger.info("⏱ Seeder done: \(String(format: "%.0f", (CFAbsoluteTimeGetCurrent() - start) * 1000))ms")
+            launchLogger.info("Seeder done: \(String(format: "%.0f", (CFAbsoluteTimeGetCurrent() - start) * 1000))ms")
         }
     }
 }
