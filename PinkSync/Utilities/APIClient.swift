@@ -155,7 +155,7 @@ enum APIClient {
 
     // MARK: - User Management API
 
-    struct UserResponse: Decodable, Identifiable {
+    struct UserResponse: Decodable, Identifiable, Hashable {
         let userId: String
         let email: String
         let displayName: String
@@ -239,6 +239,34 @@ enum APIClient {
               (200...299).contains(http.statusCode) else {
             throw URLError(.badServerResponse)
         }
+    }
+
+    struct MergeResponse: Decodable {
+        let success: Bool
+        let message: String
+        let user: UserResponse
+    }
+
+    static func mergeUsers(primaryUserId: String, duplicateUserId: String) async throws -> MergeResponse {
+        guard let url = URL(string: "\(baseURL)/api/users/merge") else {
+            throw URLError(.badURL)
+        }
+        var request = try await authorizedRequest(url: url, method: "POST")
+        let payload: [String: String] = [
+            "primaryUserId": primaryUserId,
+            "duplicateUserId": duplicateUserId
+        ]
+        request.httpBody = try JSONSerialization.data(withJSONObject: payload)
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse else {
+            throw URLError(.badServerResponse)
+        }
+        if !(200...299).contains(http.statusCode) {
+            let body = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+            let message = body?["message"] as? String ?? "Merge failed"
+            throw AuthAPIError.registrationFailed(message)
+        }
+        return try JSONDecoder().decode(MergeResponse.self, from: data)
     }
 
     struct StartingGoaliePayload: Encodable {

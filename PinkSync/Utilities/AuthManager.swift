@@ -70,13 +70,10 @@ final class AuthManager {
             throw AuthError.appleSignInFailed
         }
 
-        let email = credential.email
-        let fullName = credential.fullName
-
         let response = try await APIClient.appleSignIn(
             identityToken: identityToken,
-            fullName: fullName,
-            email: email
+            fullName: credential.fullName,
+            email: credential.email
         )
         currentUser = response.user
         try saveTokens(access: response.accessToken, refresh: response.refreshToken)
