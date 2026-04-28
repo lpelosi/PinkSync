@@ -92,6 +92,22 @@ enum APIClient {
         _ = try? await URLSession.shared.data(for: request)
     }
 
+    static func deleteAccount() async throws {
+        guard let url = URL(string: "\(baseURL)/api/auth/delete-account") else {
+            throw URLError(.badURL)
+        }
+        let request = try await authorizedRequest(url: url, method: "DELETE")
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse else {
+            throw URLError(.badServerResponse)
+        }
+        if !(200...299).contains(http.statusCode) {
+            let body = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+            let message = body?["message"] as? String ?? "Account deletion failed"
+            throw AuthAPIError.registrationFailed(message)
+        }
+    }
+
     static func register(email: String, displayName: String, password: String) async throws -> LoginResponse {
         guard let url = URL(string: "\(baseURL)/api/auth/register") else {
             throw URLError(.badURL)

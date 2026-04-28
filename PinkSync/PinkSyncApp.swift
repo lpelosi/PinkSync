@@ -1,9 +1,5 @@
 import SwiftUI
 import SwiftData
-import os
-
-private let launchStart = CFAbsoluteTimeGetCurrent()
-private let logger = Logger(subsystem: "PinkSync", category: "Launch")
 
 @main
 struct PinkSyncApp: App {
@@ -23,9 +19,6 @@ struct PinkSyncApp: App {
                         MainTabView()
                             .modelContainer(container)
                             .environment(authManager)
-                            .onAppear {
-                                logger.info("MainTabView appeared: \(String(format: "%.0f", (CFAbsoluteTimeGetCurrent() - launchStart) * 1000))ms")
-                            }
                     } else {
                         LoginView()
                             .environment(authManager)
@@ -33,7 +26,6 @@ struct PinkSyncApp: App {
                 } else {
                     LaunchView()
                         .task {
-                            let start = CFAbsoluteTimeGetCurrent()
                             do {
                                 let c = try ModelContainer(for:
                                     Team.self,
@@ -44,11 +36,9 @@ struct PinkSyncApp: App {
                                     ShootoutRound.self,
                                     OpponentTeam.self
                                 )
-                                logger.info("Container ready: \(String(format: "%.0f", (CFAbsoluteTimeGetCurrent() - start) * 1000))ms")
                                 APIClient.authManager = authManager
                                 container = c
                             } catch {
-                                logger.error("ModelContainer init failed: \(error.localizedDescription)")
                                 containerError = error.localizedDescription
                             }
                         }

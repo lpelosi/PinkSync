@@ -147,6 +147,17 @@ final class AuthManager {
         }
     }
 
+    // MARK: - Account Deletion
+
+    func deleteAccount() async {
+        try? await APIClient.deleteAccount()
+        KeychainHelper.delete(key: "accessToken")
+        KeychainHelper.delete(key: "refreshToken")
+        KeychainHelper.delete(key: "currentUser")
+        biometricEnabled = false
+        currentUser = nil
+    }
+
     // MARK: - Logout
 
     func logout() {

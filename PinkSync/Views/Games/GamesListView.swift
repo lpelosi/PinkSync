@@ -1,8 +1,5 @@
 import SwiftUI
 import SwiftData
-import os
-
-private let gamesLogger = Logger(subsystem: "PinkSync", category: "Launch")
 
 struct GamesListView: View {
     @Query(sort: \Game.date, order: .reverse) private var games: [Game]
@@ -274,7 +271,6 @@ struct GamesListView: View {
     // MARK: - Sync
 
     private func syncGamesFromServer() async {
-        let start = CFAbsoluteTimeGetCurrent()
         isSyncing = true
         syncError = nil
 
@@ -353,7 +349,6 @@ struct GamesListView: View {
         }
 
         isSyncing = false
-        gamesLogger.info("⏱ Sync done: \(String(format: "%.0f", (CFAbsoluteTimeGetCurrent() - start) * 1000))ms")
     }
 
     /// Find a local player by playerId (preferred) or jersey number (fallback for legacy data).

@@ -1,8 +1,5 @@
 import SwiftUI
 import SwiftData
-import os
-
-private let launchLogger = Logger(subsystem: "PinkSync", category: "Launch")
 
 struct MainTabView: View {
     @Environment(\.modelContext) private var modelContext
@@ -61,9 +58,7 @@ struct MainTabView: View {
         }
         .tint(AppTheme.pink)
         .task {
-            let start = CFAbsoluteTimeGetCurrent()
             RosterSeeder.seedIfNeeded(modelContext: modelContext)
-            launchLogger.info("Seeder done: \(String(format: "%.0f", (CFAbsoluteTimeGetCurrent() - start) * 1000))ms")
         }
     }
 }

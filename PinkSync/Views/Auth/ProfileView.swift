@@ -2,6 +2,8 @@ import SwiftUI
 
 struct ProfileView: View {
     @Environment(AuthManager.self) private var authManager
+    @State private var showingDeleteConfirmation = false
+    @State private var isDeleting = false
 
     var body: some View {
         List {
@@ -47,8 +49,37 @@ struct ProfileView: View {
                         authManager.logout()
                     }
                 }
+
+                Section {
+                    Button(role: .destructive) {
+                        showingDeleteConfirmation = true
+                    } label: {
+                        HStack {
+                            if isDeleting {
+                                ProgressView()
+                                    .padding(.trailing, 4)
+                            }
+                            Text("Delete Account")
+                        }
+                    }
+                    .disabled(isDeleting)
+                } footer: {
+                    Text("Permanently deletes your account and all associated data. This action cannot be undone.")
+                }
             }
         }
         .navigationTitle("Profile")
+        .alert("Delete Account?", isPresented: $showingDeleteConfirmation) {
+            Button("Cancel", role: .cancel) {}
+            Button("Delete", role: .destructive) {
+                Task {
+                    isDeleting = true
+                    await authManager.deleteAccount()
+                    isDeleting = false
+                }
+            }
+        } message: {
+            Text("This will permanently delete your account and all associated data. This action cannot be undone.")
+        }
     }
 }
