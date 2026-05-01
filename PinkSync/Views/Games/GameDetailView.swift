@@ -217,6 +217,7 @@ struct GameDetailView: View {
                 pendingCheckedIn = nil
                 let vm = LiveGameViewModel(game: game, modelContext: modelContext)
                 vm.checkedInPlayers = players
+                vm.initializeStatsForCheckedInPlayers()
                 liveVM = vm
             }
         }) {

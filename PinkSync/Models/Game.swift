@@ -24,6 +24,9 @@ final class Game {
     @Relationship(deleteRule: .cascade, inverse: \GameGoalieStats.game)
     var goalieStats: [GameGoalieStats] = []
 
+    @Relationship(deleteRule: .cascade, inverse: \GameEvent.game)
+    var events: [GameEvent] = []
+
     init(
         date: Date,
         opponent: String,

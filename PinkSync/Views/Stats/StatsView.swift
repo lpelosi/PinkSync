@@ -50,6 +50,8 @@ struct StatsView: View {
             sortableHeader("G", width: 28, key: "G", isSkater: true)
             sortableHeader("A", width: 28, key: "A", isSkater: true)
             sortableHeader("P", width: 28, key: "P", isSkater: true)
+            sortableHeader("PPG", width: 32, key: "PPG", isSkater: true)
+            sortableHeader("FO%", width: 36, key: "FO%", isSkater: true)
             sortableHeader("SOG", width: 36, key: "SOG", isSkater: true)
             sortableHeader("PIM", width: 36, key: "PIM", isSkater: true)
         }
@@ -68,6 +70,8 @@ struct StatsView: View {
             Text("\(player.totalGoals)").frame(width: 28)
             Text("\(player.totalAssists)").frame(width: 28)
             Text("\(player.totalPoints)").frame(width: 28)
+            Text("\(player.totalPowerPlayGoals)").frame(width: 32)
+            Text((player.totalFaceoffWins + player.totalFaceoffLosses) > 0 ? String(format: "%.0f", player.faceoffPercentage) : "-").frame(width: 36)
             Text("\(player.totalShots)").frame(width: 36)
             Text("\(player.totalPenaltyMinutes)").frame(width: 36)
         }
@@ -128,6 +132,8 @@ struct StatsView: View {
             case "G": a.totalGoals > b.totalGoals
             case "A": a.totalAssists > b.totalAssists
             case "P": a.totalPoints > b.totalPoints
+            case "PPG": a.totalPowerPlayGoals > b.totalPowerPlayGoals
+            case "FO%": a.faceoffPercentage > b.faceoffPercentage
             case "SOG": a.totalShots > b.totalShots
             case "PIM": a.totalPenaltyMinutes > b.totalPenaltyMinutes
             default: a.totalPoints > b.totalPoints

@@ -302,6 +302,23 @@ enum APIClient {
         let startingGoalie: StartingGoaliePayload?
         let playerStats: [PlayerStatPayload]
         let goalieStats: [GoalieStatPayload]
+        let events: [EventPayload]
+    }
+
+    struct EventPayload: Encodable {
+        let type: String
+        let period: Int
+        let clockTime: String
+        let playerName: String
+        let playerNumber: Int
+        let assist1Name: String?
+        let assist1Number: Int?
+        let assist2Name: String?
+        let assist2Number: Int?
+        let penaltyMinutes: Int?
+        let penaltyType: String?
+        let opponentNumber: String?
+        let isPowerPlay: Bool?
     }
 
     struct PlayerStatPayload: Encodable {
@@ -315,6 +332,9 @@ enum APIClient {
         let hits: Int
         let blocks: Int
         let penaltyMinutes: Int
+        let powerPlayGoals: Int
+        let faceoffWins: Int
+        let faceoffLosses: Int
     }
 
     struct GoalieStatPayload: Encodable {
@@ -382,7 +402,10 @@ enum APIClient {
                 assists: stat.assists,
                 hits: stat.hits,
                 blocks: stat.blocks,
-                penaltyMinutes: stat.penaltyMinutes
+                penaltyMinutes: stat.penaltyMinutes,
+                powerPlayGoals: stat.powerPlayGoals,
+                faceoffWins: stat.faceoffWins,
+                faceoffLosses: stat.faceoffLosses
             )
         }
 
@@ -431,6 +454,24 @@ enum APIClient {
             )
         }
 
+        let eventPayloads = game.events.map { event in
+            EventPayload(
+                type: event.type,
+                period: event.period,
+                clockTime: event.clockTime,
+                playerName: event.playerName,
+                playerNumber: event.playerNumber,
+                assist1Name: event.assist1Name.isEmpty ? nil : event.assist1Name,
+                assist1Number: event.assist1Number == 0 ? nil : event.assist1Number,
+                assist2Name: event.assist2Name.isEmpty ? nil : event.assist2Name,
+                assist2Number: event.assist2Number == 0 ? nil : event.assist2Number,
+                penaltyMinutes: event.penaltyMinutes == 0 ? nil : event.penaltyMinutes,
+                penaltyType: event.penaltyType.isEmpty ? nil : event.penaltyType,
+                opponentNumber: event.opponentNumber.isEmpty ? nil : event.opponentNumber,
+                isPowerPlay: event.isPowerPlay ? true : nil
+            )
+        }
+
         let payload = GamePayload(
             gameId: game.gameId,
             date: dateFormatter.string(from: game.date),
@@ -441,7 +482,8 @@ enum APIClient {
             result: game.result,
             startingGoalie: startingGoaliePayload,
             playerStats: playerPayloads,
-            goalieStats: goaliePayloads
+            goalieStats: goaliePayloads,
+            events: eventPayloads
         )
 
         request.httpBody = try JSONEncoder().encode(payload)

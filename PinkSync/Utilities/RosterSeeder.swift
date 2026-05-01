@@ -16,7 +16,7 @@ enum RosterSeeder {
         PlayerData(playerId: "21DD54B3-D7E5-4341-A054-DC60F897D9DF", name: "James Phillips", number: 41, position: "Goalie", isGoalie: true),
         PlayerData(playerId: "12945F9E-8D09-4FE4-9474-4AAD1982BA14", name: "JP 'Chupa' Quinones", number: 24, position: "Forward", isGoalie: true),
         PlayerData(playerId: "409E990E-792C-43EE-A7F3-BD4B188DD271", name: "Louis 'Gramps' Pelosi", number: 35, position: "Forward", isGoalie: true),
-        PlayerData(playerId: "C76CF8B2-EB8B-4FE3-99BC-B51B58B9A326", name: "Jordan 'Jordaddy' Jacobson", number: 74, position: "Defense", isGoalie: true),
+        PlayerData(playerId: "C76CF8B2-EB8B-4FE3-99BC-B51B58B9A326", name: "Jordan 'Jordaddy' Jacobson", number: 64, position: "Defense", isGoalie: true),
 
         // Defense
         PlayerData(playerId: "FB343F79-1594-4AA2-B321-B29C4750BBC2", name: "Nick Mills", number: 1, position: "Defense", isGoalie: false),
@@ -81,12 +81,13 @@ enum RosterSeeder {
         seedOpponentTeamsIfNeeded(modelContext: modelContext)
     }
 
-    /// Backfill playerId on existing players and fix known name typos.
-    /// Runs on every launch; skips quickly once all players have IDs.
+    /// Sync player data from rosterData on every launch.
+    /// Backfills playerId, fixes name typos, and updates numbers/names.
     private static func migratePlayerIds(modelContext: ModelContext) {
         let descriptor = FetchDescriptor<Player>()
         guard let players = try? modelContext.fetch(descriptor) else { return }
 
+        let rosterByPlayerId = Dictionary(uniqueKeysWithValues: rosterData.map { ($0.playerId, $0) })
         var changed = false
 
         for player in players {
@@ -98,15 +99,24 @@ enum RosterSeeder {
 
             // Assign playerId if empty
             if player.playerId.isEmpty {
-                // Try exact match first (name + number)
                 if let match = rosterData.first(where: { $0.name == player.name && $0.number == player.number }) {
                     player.playerId = match.playerId
                     changed = true
-                }
-                // Fallback: match by number alone (for non-zero numbers which are unique)
-                else if player.number > 0,
-                        let match = rosterData.first(where: { $0.number == player.number }) {
+                } else if player.number > 0,
+                          let match = rosterData.first(where: { $0.number == player.number }) {
                     player.playerId = match.playerId
+                    changed = true
+                }
+            }
+
+            // Sync number and name from rosterData for players with a known playerId
+            if !player.playerId.isEmpty, let canonical = rosterByPlayerId[player.playerId] {
+                if player.number != canonical.number {
+                    player.number = canonical.number
+                    changed = true
+                }
+                if player.name != canonical.name {
+                    player.name = canonical.name
                     changed = true
                 }
             }

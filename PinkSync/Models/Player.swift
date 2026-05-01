@@ -58,6 +58,14 @@ final class Player {
     var totalHits: Int { gameStats.reduce(0) { $0 + $1.hits } }
     var totalBlocks: Int { gameStats.reduce(0) { $0 + $1.blocks } }
     var totalPenaltyMinutes: Int { gameStats.reduce(0) { $0 + $1.penaltyMinutes } }
+    var totalPowerPlayGoals: Int { gameStats.reduce(0) { $0 + $1.powerPlayGoals } }
+    var totalFaceoffWins: Int { gameStats.reduce(0) { $0 + $1.faceoffWins } }
+    var totalFaceoffLosses: Int { gameStats.reduce(0) { $0 + $1.faceoffLosses } }
+    var faceoffPercentage: Double {
+        let total = totalFaceoffWins + totalFaceoffLosses
+        guard total > 0 else { return 0 }
+        return Double(totalFaceoffWins) / Double(total) * 100
+    }
 
     // MARK: - Goalie Aggregates
 

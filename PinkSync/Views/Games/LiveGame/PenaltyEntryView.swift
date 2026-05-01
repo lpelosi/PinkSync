@@ -5,11 +5,12 @@ struct PenaltyEntryView: View {
     let isOurs: Bool
     let players: [Player]
     let excluded: Set<PersistentIdentifier>
-    let onRecord: (Player?, String, PenaltyType) -> Void
+    let onRecord: (Player?, String, PenaltyType, String) -> Void
 
     @Environment(\.dismiss) private var dismiss
     @State private var selectedPlayer: Player?
     @State private var opponentNumber = ""
+    @State private var clockTime = ""
     @State private var step: Step = .pickPlayer
 
     private enum Step {
@@ -106,22 +107,30 @@ struct PenaltyEntryView: View {
 
     private var penaltyTypePicker: some View {
         List {
-            ForEach(PenaltyType.allCases) { type in
-                Button {
-                    onRecord(selectedPlayer, opponentNumber, type)
-                    dismiss()
-                } label: {
-                    HStack {
-                        Text(type.rawValue)
-                            .font(.headline)
-                        Spacer()
-                        Text("\(type.minutes) min")
-                            .foregroundStyle(.secondary)
-                            .font(.system(.body, design: .monospaced))
+            Section {
+                ClockTimeField(time: $clockTime)
+            } header: {
+                Text("Period Time (optional)")
+            }
+
+            Section("Penalty Type") {
+                ForEach(PenaltyType.allCases) { type in
+                    Button {
+                        onRecord(selectedPlayer, opponentNumber, type, clockTime)
+                        dismiss()
+                    } label: {
+                        HStack {
+                            Text(type.rawValue)
+                                .font(.headline)
+                            Spacer()
+                            Text("\(type.minutes) min")
+                                .foregroundStyle(.secondary)
+                                .font(.system(.body, design: .monospaced))
+                        }
+                        .padding(.vertical, 6)
                     }
-                    .padding(.vertical, 6)
+                    .tint(.primary)
                 }
-                .tint(.primary)
             }
         }
     }
