@@ -19,6 +19,18 @@ struct GamesListView: View {
     @State private var boutToDelete: APIClient.ScheduleEntry?
     @State private var navigateToGame: Game?
 
+    private var filteredSchedule: [APIClient.ScheduleEntry] {
+        let linkedScheduleIds = Set(games.compactMap { $0.scheduleId.isEmpty ? nil : $0.scheduleId })
+        return schedule.filter { entry in
+            if linkedScheduleIds.contains(entry.id) { return false }
+            let entryDate = boutDate(entry)
+            return !games.contains { game in
+                let daysBetween = abs(Calendar.current.dateComponents([.day], from: game.date, to: entryDate).day ?? 999)
+                return daysBetween <= 1 && game.opponent == entry.opponent
+            }
+        }
+    }
+
     var body: some View {
         List {
             // Logo header
@@ -60,9 +72,9 @@ struct GamesListView: View {
             }
 
             // Upcoming Bouts
-            if !schedule.isEmpty {
+            if !filteredSchedule.isEmpty {
                 Section("Upcoming") {
-                    ForEach(schedule) { entry in
+                    ForEach(filteredSchedule) { entry in
                         Button {
                             if authManager.canManageGames {
                                 createGameFromBout(entry)
@@ -223,9 +235,8 @@ struct GamesListView: View {
 
     // MARK: - Create from Bout
 
-    private func createGameFromBout(_ entry: APIClient.ScheduleEntry) {
+    private func boutDate(_ entry: APIClient.ScheduleEntry) -> Date {
         let parts = entry.date.split(separator: "-")
-        var boutDate = Date()
         if parts.count == 3,
            let y = Int(parts[0]), let m = Int(parts[1]), let d = Int(parts[2]) {
             var comps = DateComponents()
@@ -233,16 +244,20 @@ struct GamesListView: View {
             comps.month = m
             comps.day = d
             if let parsed = Calendar.current.date(from: comps) {
-                boutDate = parsed
+                return parsed
             }
         }
+        return Date()
+    }
 
+    private func createGameFromBout(_ entry: APIClient.ScheduleEntry) {
         let teamDescriptor = FetchDescriptor<Team>(
             predicate: #Predicate { $0.name == "Frozen Flamingos" }
         )
         let team = try? modelContext.fetch(teamDescriptor).first
 
-        let game = Game(date: boutDate, opponent: entry.opponent, location: entry.location)
+        let game = Game(date: boutDate(entry), opponent: entry.opponent, location: entry.location)
+        game.scheduleId = entry.id
         game.team = team
         modelContext.insert(game)
         try? modelContext.save()
@@ -324,6 +339,7 @@ struct GamesListView: View {
                         isSynced: true
                     )
                     newGame.gameId = remoteId
+                    newGame.scheduleId = remote.scheduleId ?? ""
                     newGame.team = team
                     if let sg = remote.startingGoalie {
                         newGame.startingGoalie = findPlayer(sg.playerId, number: sg.playerNumber, playerById: playerById, playerByNumber: playerByNumber)
@@ -388,6 +404,9 @@ struct GamesListView: View {
         local.result = remote.result
         local.isComplete = true
         local.isSynced = true
+        if let sid = remote.scheduleId, !sid.isEmpty {
+            local.scheduleId = sid
+        }
         if let sg = remote.startingGoalie {
             local.startingGoalie = findPlayer(sg.playerId, number: sg.playerNumber, playerById: playerById, playerByNumber: playerByNumber)
         }

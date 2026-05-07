@@ -293,6 +293,7 @@ enum APIClient {
 
     struct GamePayload: Encodable {
         let gameId: String
+        let scheduleId: String?
         let date: String
         let opponent: String
         let location: String
@@ -319,6 +320,7 @@ enum APIClient {
         let penaltyType: String?
         let opponentNumber: String?
         let isPowerPlay: Bool?
+        let isShortHanded: Bool?
     }
 
     struct PlayerStatPayload: Encodable {
@@ -333,6 +335,10 @@ enum APIClient {
         let blocks: Int
         let penaltyMinutes: Int
         let powerPlayGoals: Int
+        let shortHandedGoals: Int
+        let powerPlayAssists: Int
+        let shortHandedAssists: Int
+        let gameWinningGoals: Int
         let faceoffWins: Int
         let faceoffLosses: Int
     }
@@ -404,6 +410,10 @@ enum APIClient {
                 blocks: stat.blocks,
                 penaltyMinutes: stat.penaltyMinutes,
                 powerPlayGoals: stat.powerPlayGoals,
+                shortHandedGoals: stat.shortHandedGoals,
+                powerPlayAssists: stat.powerPlayAssists,
+                shortHandedAssists: stat.shortHandedAssists,
+                gameWinningGoals: stat.gameWinningGoals,
                 faceoffWins: stat.faceoffWins,
                 faceoffLosses: stat.faceoffLosses
             )
@@ -468,12 +478,14 @@ enum APIClient {
                 penaltyMinutes: event.penaltyMinutes == 0 ? nil : event.penaltyMinutes,
                 penaltyType: event.penaltyType.isEmpty ? nil : event.penaltyType,
                 opponentNumber: event.opponentNumber.isEmpty ? nil : event.opponentNumber,
-                isPowerPlay: event.isPowerPlay ? true : nil
+                isPowerPlay: event.isPowerPlay ? true : nil,
+                isShortHanded: event.isShortHanded ? true : nil
             )
         }
 
         let payload = GamePayload(
             gameId: game.gameId,
+            scheduleId: game.scheduleId.isEmpty ? nil : game.scheduleId,
             date: dateFormatter.string(from: game.date),
             opponent: game.opponent,
             location: game.location,
@@ -760,6 +772,7 @@ enum APIClient {
 
     struct GameResponse: Decodable {
         let gameId: String?
+        let scheduleId: String?
         let date: String
         let opponent: String
         let location: String?

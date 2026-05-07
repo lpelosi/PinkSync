@@ -63,10 +63,23 @@ struct PlayerDetailView: View {
                 statRow("Goals", value: "\(player.totalGoals)")
                 statRow("Assists", value: "\(player.totalAssists)")
                 statRow("Points", value: "\(player.totalPoints)")
+                statRow("PPG", value: "\(player.totalPowerPlayGoals)")
+                statRow("PPA", value: "\(player.totalPowerPlayAssists)")
+                statRow("SHG", value: "\(player.totalShortHandedGoals)")
+                statRow("SHA", value: "\(player.totalShortHandedAssists)")
+                statRow("GWG", value: "\(player.totalGameWinningGoals)")
                 statRow("Shots", value: "\(player.totalShots)")
                 statRow("Hits", value: "\(player.totalHits)")
                 statRow("Blocks", value: "\(player.totalBlocks)")
                 statRow("PIM", value: "\(player.totalPenaltyMinutes)")
+            }
+
+            if player.totalFaceoffWins + player.totalFaceoffLosses > 0 {
+                Section("Faceoffs") {
+                    statRow("Wins", value: "\(player.totalFaceoffWins)")
+                    statRow("Losses", value: "\(player.totalFaceoffLosses)")
+                    statRow("FO%", value: String(format: "%.1f%%", player.faceoffPercentage))
+                }
             }
         }
         .navigationTitle(player.name)

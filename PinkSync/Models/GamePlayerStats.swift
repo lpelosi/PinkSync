@@ -10,6 +10,10 @@ final class GamePlayerStats {
     var blocks: Int
     var penaltyMinutes: Int
     var powerPlayGoals: Int = 0
+    var shortHandedGoals: Int = 0
+    var powerPlayAssists: Int = 0
+    var shortHandedAssists: Int = 0
+    var gameWinningGoals: Int = 0
     var faceoffWins: Int = 0
     var faceoffLosses: Int = 0
 
@@ -24,6 +28,10 @@ final class GamePlayerStats {
         blocks: Int = 0,
         penaltyMinutes: Int = 0,
         powerPlayGoals: Int = 0,
+        shortHandedGoals: Int = 0,
+        powerPlayAssists: Int = 0,
+        shortHandedAssists: Int = 0,
+        gameWinningGoals: Int = 0,
         faceoffWins: Int = 0,
         faceoffLosses: Int = 0
     ) {
@@ -34,6 +42,10 @@ final class GamePlayerStats {
         self.blocks = blocks
         self.penaltyMinutes = penaltyMinutes
         self.powerPlayGoals = powerPlayGoals
+        self.shortHandedGoals = shortHandedGoals
+        self.powerPlayAssists = powerPlayAssists
+        self.shortHandedAssists = shortHandedAssists
+        self.gameWinningGoals = gameWinningGoals
         self.faceoffWins = faceoffWins
         self.faceoffLosses = faceoffLosses
     }

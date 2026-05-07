@@ -16,6 +16,7 @@ final class GameEvent {
     var penaltyType: String
     var opponentNumber: String
     var isPowerPlay: Bool = false
+    var isShortHanded: Bool = false
     var game: Game?
 
     init(
@@ -31,7 +32,8 @@ final class GameEvent {
         penaltyMinutes: Int = 0,
         penaltyType: String = "",
         opponentNumber: String = "",
-        isPowerPlay: Bool = false
+        isPowerPlay: Bool = false,
+        isShortHanded: Bool = false
     ) {
         self.type = type
         self.period = period
@@ -46,5 +48,6 @@ final class GameEvent {
         self.penaltyType = penaltyType
         self.opponentNumber = opponentNumber
         self.isPowerPlay = isPowerPlay
+        self.isShortHanded = isShortHanded
     }
 }

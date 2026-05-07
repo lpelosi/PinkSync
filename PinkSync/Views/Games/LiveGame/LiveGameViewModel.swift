@@ -55,12 +55,29 @@ enum PenaltyType: String, CaseIterable, Identifiable {
     }
 }
 
+struct ActivePenalty: Identifiable {
+    let id = UUID()
+    let playerName: String
+    let playerNumber: Int
+    let isOurs: Bool
+    let type: PenaltyType
+    let totalSeconds: Int
+    var remainingSeconds: Int
+
+    var display: String {
+        let mins = remainingSeconds / 60
+        let secs = remainingSeconds % 60
+        return "#\(playerNumber > 0 ? "\(playerNumber)" : "?") \(mins):\(String(format: "%02d", secs))"
+    }
+}
+
 struct LiveEvent: Identifiable {
     let id = UUID()
     let timestamp = Date()
     let emoji: String
     let description: String
     let undoClosure: (() -> Void)?
+    var gameEvent: GameEvent?
 }
 
 @Observable
@@ -78,7 +95,7 @@ final class LiveGameViewModel: Identifiable {
     var pendingPrimaryAssist: Player?
     var pendingSecondaryAssist: Player?
     var pendingClockTime: String = ""
-    var pendingIsPowerPlay: Bool = false
+    var pendingGoalStrength: Int = 0 // 0=ES, 1=PP, 2=SH
 
     var period: GamePeriod = .regulation
     var currentPeriod: Int = 1
@@ -91,12 +108,22 @@ final class LiveGameViewModel: Identifiable {
     var lastRecordedPlayer: Player?
     var lastRecordedAction: LiveAction?
 
-    // Line management
-    var playerLines: [PersistentIdentifier: Int] = [:]
-    var activeLineFilter: Int?
+    // Line management (values: "F1"-"F4" for forward lines, "D1"-"D3" for defense pairings)
+    var playerLines: [PersistentIdentifier: String] = [:]
+    var activeLineFilter: String?
 
     // Goal flash
     var goalFlashColor: Color?
+
+    // Game clock
+    var periodLengthMinutes: Int = 15
+    var clockSeconds: Int = 0
+    var clockRunning: Bool = false
+    var isClockSetUp: Bool = false
+    private var clockTask: Task<Void, Never>?
+
+    // Active penalties
+    var activePenalties: [ActivePenalty] = []
 
     private let haptic = UIImpactFeedbackGenerator(style: .medium)
 
@@ -121,8 +148,12 @@ final class LiveGameViewModel: Identifiable {
         return skaters.filter { playerLines[$0.persistentModelID] == line }
     }
 
-    var configuredLineNumbers: [Int] {
-        Array(Set(playerLines.values)).sorted()
+    var configuredForwardLines: [String] {
+        Array(Set(playerLines.values.filter { $0.hasPrefix("F") })).sorted()
+    }
+
+    var configuredDefensePairings: [String] {
+        Array(Set(playerLines.values.filter { $0.hasPrefix("D") })).sorted()
     }
 
     func initializeStatsForCheckedInPlayers() {
@@ -142,6 +173,103 @@ final class LiveGameViewModel: Identifiable {
         case 3: "3rd"
         default: "OT"
         }
+    }
+
+    var totalShotsFor: Int {
+        game.playerStats.reduce(0) { $0 + $1.shots }
+    }
+
+    var totalShotsAgainst: Int {
+        game.goalieStats.reduce(0) { $0 + $1.shotsAgainst }
+    }
+
+    // MARK: - Game Clock
+
+    var clockDisplay: String {
+        let mins = clockSeconds / 60
+        let secs = clockSeconds % 60
+        return String(format: "%d:%02d", mins, secs)
+    }
+
+    var currentClockTime: String {
+        guard isClockSetUp else { return "" }
+        return clockDisplay
+    }
+
+    var ourPenalties: [ActivePenalty] {
+        activePenalties.filter { $0.isOurs }
+    }
+
+    var theirPenalties: [ActivePenalty] {
+        activePenalties.filter { !$0.isOurs }
+    }
+
+    var onPowerPlay: Bool { theirPenalties.count > ourPenalties.count }
+    var shortHanded: Bool { ourPenalties.count > theirPenalties.count }
+
+    func setupClock(minutes: Int) {
+        periodLengthMinutes = minutes
+        clockSeconds = minutes * 60
+        isClockSetUp = true
+    }
+
+    func toggleClock() {
+        if clockRunning { stopClock() } else { startClock() }
+    }
+
+    func startClock() {
+        guard clockSeconds > 0 else { return }
+        clockRunning = true
+        clockTask = Task { @MainActor in
+            while !Task.isCancelled && clockRunning && clockSeconds > 0 {
+                try? await Task.sleep(for: .seconds(1))
+                guard !Task.isCancelled, clockRunning else { break }
+                clockSeconds -= 1
+                for i in activePenalties.indices {
+                    if activePenalties[i].remainingSeconds > 0 {
+                        activePenalties[i].remainingSeconds -= 1
+                    }
+                }
+                activePenalties.removeAll { $0.remainingSeconds <= 0 }
+                if clockSeconds == 0 {
+                    clockRunning = false
+                }
+            }
+        }
+    }
+
+    func stopClock() {
+        clockRunning = false
+        clockTask?.cancel()
+        clockTask = nil
+    }
+
+    func setClockTime(minutes: Int, seconds: Int) {
+        clockSeconds = minutes * 60 + seconds
+    }
+
+    @discardableResult
+    func addPenalty(playerName: String, playerNumber: Int, isOurs: Bool, type: PenaltyType) -> UUID {
+        let penalty = ActivePenalty(
+            playerName: playerName,
+            playerNumber: playerNumber,
+            isOurs: isOurs,
+            type: type,
+            totalSeconds: type.minutes * 60,
+            remainingSeconds: type.minutes * 60
+        )
+        activePenalties.append(penalty)
+        return penalty.id
+    }
+
+    func clearShortestMinorPenalty(ours: Bool) {
+        guard let idx = activePenalties
+            .enumerated()
+            .filter({ $0.element.isOurs == ours && ($0.element.type == .minor || $0.element.type == .doubleMinor) })
+            .min(by: { $0.element.remainingSeconds < $1.element.remainingSeconds })?
+            .offset
+        else { return }
+        activePenalties.remove(at: idx)
     }
 
     // MARK: - Find or Create
@@ -199,12 +327,14 @@ final class LiveGameViewModel: Identifiable {
         penaltyMinutes: Int = 0,
         penaltyType: String = "",
         opponentNumber: String = "",
-        isPowerPlay: Bool = false
+        isPowerPlay: Bool = false,
+        isShortHanded: Bool = false
     ) -> GameEvent {
+        let resolvedClockTime = clockTime.isEmpty ? currentClockTime : clockTime
         let event = GameEvent(
             type: type,
             period: currentPeriod,
-            clockTime: clockTime,
+            clockTime: resolvedClockTime,
             playerName: player?.name ?? "",
             playerNumber: player?.number ?? 0,
             assist1Name: assist1?.name ?? "",
@@ -214,7 +344,8 @@ final class LiveGameViewModel: Identifiable {
             penaltyMinutes: penaltyMinutes,
             penaltyType: penaltyType,
             opponentNumber: opponentNumber,
-            isPowerPlay: isPowerPlay
+            isPowerPlay: isPowerPlay,
+            isShortHanded: isShortHanded
         )
         event.game = game
         modelContext.insert(event)
@@ -224,21 +355,36 @@ final class LiveGameViewModel: Identifiable {
     // MARK: - Period Transitions
 
     func endPeriod() {
+        let skippedSeconds = clockSeconds
+        stopClock()
+        // Sync penalty timers: subtract remaining clock time
+        for i in activePenalties.indices {
+            activePenalties[i].remainingSeconds -= skippedSeconds
+        }
+        activePenalties.removeAll { $0.remainingSeconds <= 0 }
         events.append(LiveEvent(emoji: "⏱️", description: "— End of \(periodLabel) Period —", undoClosure: nil))
         currentPeriod += 1
+        if isClockSetUp {
+            clockSeconds = periodLengthMinutes * 60
+        }
         save()
         fire()
     }
 
     func goToOvertime() {
+        stopClock()
         period = .overtime
         currentPeriod = 4
+        if isClockSetUp {
+            clockSeconds = 5 * 60
+        }
         events.append(LiveEvent(emoji: "⏱️", description: "— OVERTIME —", undoClosure: nil))
         save()
         fire()
     }
 
     func goToShootout() {
+        stopClock()
         period = .shootout
         ourShootoutGoals = 0
         theirShootoutGoals = 0
@@ -318,6 +464,22 @@ final class LiveGameViewModel: Identifiable {
             goalieStats.result = result.rawValue
         }
 
+        // GWG: the Nth goal where N = opponent final goals + 1 (reg/OT only)
+        if period != .shootout && game.goalsFor > game.goalsAgainst {
+            let gwgNumber = game.goalsAgainst + 1
+            var goalCount = 0
+            for event in events {
+                guard let ge = event.gameEvent, ge.type == "goal" else { continue }
+                goalCount += 1
+                if goalCount == gwgNumber {
+                    if let player = findPlayer(named: ge.playerName, number: ge.playerNumber) {
+                        findOrCreatePlayerStats(for: player).gameWinningGoals += 1
+                    }
+                    break
+                }
+            }
+        }
+
         save()
     }
 
@@ -328,30 +490,35 @@ final class LiveGameViewModel: Identifiable {
         stats.shots += 1
         let label = playerLabel(player)
         let event = createEvent(type: "shot", player: player)
-        events.append(LiveEvent(emoji: "🏒", description: "\(periodLabel) \(label) — Shot") {
+        events.append(LiveEvent(emoji: "🏒", description: "\(periodLabel) \(label) — Shot", undoClosure: {
             stats.shots -= 1
             self.removeGameEvent(event)
-        })
+        }, gameEvent: event))
         lastRecordedPlayer = player
         lastRecordedAction = .shot
         save()
         fire()
     }
 
-    func recordGoal(scorer: Player, primaryAssist: Player?, secondaryAssist: Player?, clockTime: String = "", isPowerPlay: Bool = false) {
+    func recordGoal(scorer: Player, primaryAssist: Player?, secondaryAssist: Player?, clockTime: String = "", isPowerPlay: Bool = false, isShortHanded: Bool = false) {
         let scorerStats = findOrCreatePlayerStats(for: scorer)
         scorerStats.goals += 1
         if isPowerPlay { scorerStats.powerPlayGoals += 1 }
+        if isShortHanded { scorerStats.shortHandedGoals += 1 }
         game.goalsFor += 1
 
         var assistText = ""
         if let a1 = primaryAssist {
             let a1Stats = findOrCreatePlayerStats(for: a1)
             a1Stats.assists += 1
+            if isPowerPlay { a1Stats.powerPlayAssists += 1 }
+            if isShortHanded { a1Stats.shortHandedAssists += 1 }
             assistText = " (A: \(playerLabel(a1))"
             if let a2 = secondaryAssist {
                 let a2Stats = findOrCreatePlayerStats(for: a2)
                 a2Stats.assists += 1
+                if isPowerPlay { a2Stats.powerPlayAssists += 1 }
+                if isShortHanded { a2Stats.shortHandedAssists += 1 }
                 assistText += ", \(playerLabel(a2))"
             }
             assistText += ")"
@@ -359,23 +526,35 @@ final class LiveGameViewModel: Identifiable {
 
         let label = playerLabel(scorer)
         let timeStr = clockTime.isEmpty ? "" : " \(clockTime)"
-        let ppStr = isPowerPlay ? " PP" : ""
-        let event = createEvent(type: "goal", player: scorer, clockTime: clockTime, assist1: primaryAssist, assist2: secondaryAssist, isPowerPlay: isPowerPlay)
+        let strengthStr = isPowerPlay ? " PP" : isShortHanded ? " SH" : ""
+        let event = createEvent(type: "goal", player: scorer, clockTime: clockTime, assist1: primaryAssist, assist2: secondaryAssist, isPowerPlay: isPowerPlay, isShortHanded: isShortHanded)
         let wasPP = isPowerPlay
-        events.append(LiveEvent(emoji: "🚨", description: "\(periodLabel)\(timeStr) \(label) — GOAL\(ppStr)\(assistText)") {
+        let wasSH = isShortHanded
+        events.append(LiveEvent(emoji: "🚨", description: "\(periodLabel)\(timeStr) \(label) — GOAL\(strengthStr)\(assistText)", undoClosure: {
             scorerStats.goals -= 1
             if wasPP { scorerStats.powerPlayGoals -= 1 }
+            if wasSH { scorerStats.shortHandedGoals -= 1 }
             self.game.goalsFor -= 1
             if let a1 = primaryAssist {
-                self.findOrCreatePlayerStats(for: a1).assists -= 1
+                let a1s = self.findOrCreatePlayerStats(for: a1)
+                a1s.assists -= 1
+                if wasPP { a1s.powerPlayAssists -= 1 }
+                if wasSH { a1s.shortHandedAssists -= 1 }
             }
             if let a2 = secondaryAssist {
-                self.findOrCreatePlayerStats(for: a2).assists -= 1
+                let a2s = self.findOrCreatePlayerStats(for: a2)
+                a2s.assists -= 1
+                if wasPP { a2s.powerPlayAssists -= 1 }
+                if wasSH { a2s.shortHandedAssists -= 1 }
             }
             self.removeGameEvent(event)
-        })
+        }, gameEvent: event))
         lastRecordedPlayer = nil
         lastRecordedAction = nil
+        // PPG clears the opponent's shortest minor penalty
+        if isPowerPlay {
+            clearShortestMinorPenalty(ours: false)
+        }
         triggerGoalFlash(.pink)
         save()
         fire()
@@ -386,10 +565,10 @@ final class LiveGameViewModel: Identifiable {
         stats.hits += 1
         let label = playerLabel(player)
         let event = createEvent(type: "hit", player: player)
-        events.append(LiveEvent(emoji: "💥", description: "\(periodLabel) \(label) — Hit") {
+        events.append(LiveEvent(emoji: "💥", description: "\(periodLabel) \(label) — Hit", undoClosure: {
             stats.hits -= 1
             self.removeGameEvent(event)
-        })
+        }, gameEvent: event))
         lastRecordedPlayer = player
         lastRecordedAction = .hit
         save()
@@ -401,10 +580,10 @@ final class LiveGameViewModel: Identifiable {
         stats.blocks += 1
         let label = playerLabel(player)
         let event = createEvent(type: "block", player: player)
-        events.append(LiveEvent(emoji: "🛡️", description: "\(periodLabel) \(label) — Block") {
+        events.append(LiveEvent(emoji: "🛡️", description: "\(periodLabel) \(label) — Block", undoClosure: {
             stats.blocks -= 1
             self.removeGameEvent(event)
-        })
+        }, gameEvent: event))
         lastRecordedPlayer = player
         lastRecordedAction = .block
         save()
@@ -417,10 +596,10 @@ final class LiveGameViewModel: Identifiable {
         let label = playerLabel(player)
         let result = won ? "Won" : "Lost"
         let event = createEvent(type: won ? "faceoffWin" : "faceoffLoss", player: player)
-        events.append(LiveEvent(emoji: "🏑", description: "\(periodLabel) \(label) — FO \(result)") {
+        events.append(LiveEvent(emoji: "🏑", description: "\(periodLabel) \(label) — FO \(result)", undoClosure: {
             if won { stats.faceoffWins -= 1 } else { stats.faceoffLosses -= 1 }
             self.removeGameEvent(event)
-        })
+        }, gameEvent: event))
         save()
         fire()
     }
@@ -430,12 +609,15 @@ final class LiveGameViewModel: Identifiable {
         stats.penaltyMinutes += type.minutes
         let label = playerLabel(player)
         let mins = type.minutes
-        let timeStr = clockTime.isEmpty ? "" : " \(clockTime)"
+        let resolvedTime = clockTime.isEmpty ? currentClockTime : clockTime
+        let timeStr = resolvedTime.isEmpty ? "" : " \(resolvedTime)"
         let event = createEvent(type: "penalty", player: player, clockTime: clockTime, penaltyMinutes: type.minutes, penaltyType: type.rawValue)
-        events.append(LiveEvent(emoji: "🚫", description: "\(periodLabel)\(timeStr) \(label) — \(type.rawValue) (\(mins) min)") {
+        let penaltyId = addPenalty(playerName: player.name, playerNumber: player.number, isOurs: true, type: type)
+        events.append(LiveEvent(emoji: "🚫", description: "\(periodLabel)\(timeStr) \(label) — \(type.rawValue) (\(mins) min)", undoClosure: {
             stats.penaltyMinutes -= mins
+            self.activePenalties.removeAll { $0.id == penaltyId }
             self.removeGameEvent(event)
-        })
+        }, gameEvent: event))
         save()
         fire()
     }
@@ -446,10 +628,10 @@ final class LiveGameViewModel: Identifiable {
         stats.shotsAgainst += 1
         let label = playerLabel(goalie)
         let event = createEvent(type: "shotAgainst")
-        events.append(LiveEvent(emoji: "🧤", description: "\(periodLabel) Shot Against (\(label))") {
+        events.append(LiveEvent(emoji: "🧤", description: "\(periodLabel) Shot Against (\(label))", undoClosure: {
             stats.shotsAgainst -= 1
             self.removeGameEvent(event)
-        })
+        }, gameEvent: event))
         save()
         fire()
     }
@@ -464,12 +646,16 @@ final class LiveGameViewModel: Identifiable {
         let timeStr = clockTime.isEmpty ? "" : " \(clockTime)"
         let ppStr = isPowerPlay ? " PP" : ""
         let event = createEvent(type: "goalAgainst", clockTime: clockTime, isPowerPlay: isPowerPlay)
-        events.append(LiveEvent(emoji: "🚨", description: "\(periodLabel)\(timeStr) GOAL AGAINST\(ppStr) (\(label))") {
+        events.append(LiveEvent(emoji: "🚨", description: "\(periodLabel)\(timeStr) GOAL AGAINST\(ppStr) (\(label))", undoClosure: {
             stats.shotsAgainst -= 1
             stats.goalsAgainst -= 1
             self.game.goalsAgainst -= 1
             self.removeGameEvent(event)
-        })
+        }, gameEvent: event))
+        // PPG against us clears our shortest minor penalty
+        if isPowerPlay {
+            clearShortestMinorPenalty(ours: true)
+        }
         triggerGoalFlash(.teal)
         save()
         fire()
@@ -477,11 +663,15 @@ final class LiveGameViewModel: Identifiable {
 
     func recordOpponentPenalty(jerseyNumber: String, type: PenaltyType, clockTime: String = "") {
         let num = jerseyNumber.isEmpty ? "?" : jerseyNumber
-        let timeStr = clockTime.isEmpty ? "" : " \(clockTime)"
+        let resolvedTime = clockTime.isEmpty ? currentClockTime : clockTime
+        let timeStr = resolvedTime.isEmpty ? "" : " \(resolvedTime)"
         let event = createEvent(type: "penaltyAgainst", clockTime: clockTime, penaltyMinutes: type.minutes, penaltyType: type.rawValue, opponentNumber: jerseyNumber)
-        events.append(LiveEvent(emoji: "🚫", description: "\(periodLabel)\(timeStr) OPP #\(num) — \(type.rawValue) (\(type.minutes) min)") {
+        let jerseyNum = Int(jerseyNumber) ?? 0
+        let penaltyId = addPenalty(playerName: "", playerNumber: jerseyNum, isOurs: false, type: type)
+        events.append(LiveEvent(emoji: "🚫", description: "\(periodLabel)\(timeStr) OPP #\(num) — \(type.rawValue) (\(type.minutes) min)", undoClosure: {
+            self.activePenalties.removeAll { $0.id == penaltyId }
             self.removeGameEvent(event)
-        })
+        }, gameEvent: event))
         save()
         fire()
     }
@@ -507,8 +697,10 @@ final class LiveGameViewModel: Identifiable {
         pendingGoalScorer = nil
         pendingPrimaryAssist = nil
         pendingSecondaryAssist = nil
-        pendingClockTime = ""
-        pendingIsPowerPlay = false
+        pendingClockTime = currentClockTime
+        if onPowerPlay { pendingGoalStrength = 1 }
+        else if shortHanded { pendingGoalStrength = 2 }
+        else { pendingGoalStrength = 0 }
         currentAction = .goal
     }
 
@@ -534,12 +726,12 @@ final class LiveGameViewModel: Identifiable {
 
     func finalizeGoalWithTime() {
         guard let scorer = pendingGoalScorer else { return }
-        recordGoal(scorer: scorer, primaryAssist: pendingPrimaryAssist, secondaryAssist: pendingSecondaryAssist, clockTime: pendingClockTime, isPowerPlay: pendingIsPowerPlay)
+        recordGoal(scorer: scorer, primaryAssist: pendingPrimaryAssist, secondaryAssist: pendingSecondaryAssist, clockTime: pendingClockTime, isPowerPlay: pendingGoalStrength == 1, isShortHanded: pendingGoalStrength == 2)
         pendingGoalScorer = nil
         pendingPrimaryAssist = nil
         pendingSecondaryAssist = nil
         pendingClockTime = ""
-        pendingIsPowerPlay = false
+        pendingGoalStrength = 0
         currentAction = nil
     }
 
@@ -560,6 +752,54 @@ final class LiveGameViewModel: Identifiable {
         save()
         haptic.impactOccurred()
         haptic.prepare()
+    }
+
+    // MARK: - Edit Event (delete + re-record)
+
+    func replaceEvent(at index: Int, player: Player?, clockTime: String, isPowerPlay: Bool, isShortHanded: Bool, assist1: Player?, assist2: Player?, penaltyType: PenaltyType?, faceoffWon: Bool?, opponentNumber: String, period: Int) {
+        guard events.indices.contains(index), let gameEvent = events[index].gameEvent else { return }
+        let eventType = gameEvent.type
+
+        // Undo old stats
+        events[index].undoClosure?()
+        events.remove(at: index)
+
+        // Temporarily set period to match the edited event
+        let savedPeriod = currentPeriod
+        currentPeriod = period
+
+        // Re-record based on type
+        switch eventType {
+        case "shot":
+            if let player { recordShot(player: player) }
+        case "goal":
+            if let player {
+                recordGoal(scorer: player, primaryAssist: assist1, secondaryAssist: assist2, clockTime: clockTime, isPowerPlay: isPowerPlay, isShortHanded: isShortHanded)
+            }
+        case "hit":
+            if let player { recordHit(player: player) }
+        case "block":
+            if let player { recordBlock(player: player) }
+        case "faceoffWin", "faceoffLoss":
+            if let player, let won = faceoffWon { recordFaceoff(player: player, won: won) }
+        case "penalty":
+            if let player, let pType = penaltyType { recordPenalty(player: player, type: pType, clockTime: clockTime) }
+        case "shotAgainst":
+            recordShotAgainst()
+        case "goalAgainst":
+            recordGoalAgainst(clockTime: clockTime, isPowerPlay: isPowerPlay)
+        case "penaltyAgainst":
+            if let pType = penaltyType { recordOpponentPenalty(jerseyNumber: opponentNumber, type: pType, clockTime: clockTime) }
+        default:
+            break
+        }
+
+        currentPeriod = savedPeriod
+        save()
+    }
+
+    func findPlayer(named name: String, number: Int) -> Player? {
+        checkedInPlayers.first { $0.name == name && $0.number == number }
     }
 
     // MARK: - Goal Flash

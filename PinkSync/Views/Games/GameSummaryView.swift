@@ -170,6 +170,15 @@ struct GameSummaryView: View {
                     .background(.orange, in: Capsule())
             }
 
+            if event.isShortHanded {
+                Text("SH")
+                    .font(.system(size: 10, weight: .heavy))
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 5)
+                    .padding(.vertical, 2)
+                    .background(.purple, in: Capsule())
+            }
+
             if event.type == "goalAgainst" {
                 Text("Opponent Goal")
                     .font(.system(size: 13, weight: .medium))
@@ -308,45 +317,56 @@ struct GameSummaryView: View {
                 .foregroundStyle(.secondary)
                 .padding(.horizontal)
 
-            HStack(spacing: 0) {
-                Text("#").frame(width: 30, alignment: .leading)
-                Text("Player").frame(maxWidth: .infinity, alignment: .leading)
-                Text("SOG").frame(width: 32)
-                Text("G").frame(width: 24)
-                Text("A").frame(width: 24)
-                Text("PPG").frame(width: 30)
-                Text("H").frame(width: 24)
-                Text("BLK").frame(width: 30)
-                Text("FO%").frame(width: 34)
-                Text("PIM").frame(width: 30)
-            }
-            .font(.system(size: 9, weight: .bold))
-            .foregroundStyle(.secondary)
-            .padding(.horizontal)
-
-            Divider()
-
-            ForEach(skaterStats) { stat in
-                if let player = stat.player {
+            ScrollView(.horizontal, showsIndicators: false) {
+                VStack(alignment: .leading, spacing: 0) {
                     HStack(spacing: 0) {
-                        Text(player.number > 0 ? "\(player.number)" : "--")
-                            .frame(width: 30, alignment: .leading)
-                        Text(player.name)
-                            .lineLimit(1)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                        Text("\(stat.shots)").frame(width: 32)
-                        Text("\(stat.goals)").frame(width: 24)
-                        Text("\(stat.assists)").frame(width: 24)
-                        Text("\(stat.powerPlayGoals)").frame(width: 30)
-                        Text("\(stat.hits)").frame(width: 24)
-                        Text("\(stat.blocks)").frame(width: 30)
-                        Text(stat.totalFaceoffs > 0 ? String(format: "%.0f", stat.faceoffPercentage) : "-").frame(width: 34)
-                        Text("\(stat.penaltyMinutes)").frame(width: 30)
+                        Text("#").frame(width: 30, alignment: .leading)
+                        Text("Player").frame(width: 140, alignment: .leading)
+                        Text("SOG").frame(width: 30)
+                        Text("G").frame(width: 24)
+                        Text("A").frame(width: 24)
+                        Text("PPG").frame(width: 30)
+                        Text("PPA").frame(width: 30)
+                        Text("SHG").frame(width: 30)
+                        Text("SHA").frame(width: 30)
+                        Text("GWG").frame(width: 32)
+                        Text("H").frame(width: 24)
+                        Text("BLK").frame(width: 30)
+                        Text("FO%").frame(width: 34)
+                        Text("PIM").frame(width: 30)
                     }
-                    .font(.system(size: 11, design: .monospaced))
-                    .padding(.horizontal)
-                    .padding(.vertical, 4)
+                    .font(.system(size: 9, weight: .bold))
+                    .foregroundStyle(.secondary)
+
+                    Divider()
+
+                    ForEach(skaterStats) { stat in
+                        if let player = stat.player {
+                            HStack(spacing: 0) {
+                                Text(player.number > 0 ? "\(player.number)" : "--")
+                                    .frame(width: 30, alignment: .leading)
+                                Text(player.name)
+                                    .lineLimit(1)
+                                    .frame(width: 140, alignment: .leading)
+                                Text("\(stat.shots)").frame(width: 30)
+                                Text("\(stat.goals)").frame(width: 24)
+                                Text("\(stat.assists)").frame(width: 24)
+                                Text("\(stat.powerPlayGoals)").frame(width: 30)
+                                Text("\(stat.powerPlayAssists)").frame(width: 30)
+                                Text("\(stat.shortHandedGoals)").frame(width: 30)
+                                Text("\(stat.shortHandedAssists)").frame(width: 30)
+                                Text("\(stat.gameWinningGoals)").frame(width: 32)
+                                Text("\(stat.hits)").frame(width: 24)
+                                Text("\(stat.blocks)").frame(width: 30)
+                                Text(stat.totalFaceoffs > 0 ? String(format: "%.0f", stat.faceoffPercentage) : "-").frame(width: 34)
+                                Text("\(stat.penaltyMinutes)").frame(width: 30)
+                            }
+                            .font(.system(size: 11, design: .monospaced))
+                            .padding(.vertical, 4)
+                        }
+                    }
                 }
+                .padding(.horizontal)
             }
         }
     }

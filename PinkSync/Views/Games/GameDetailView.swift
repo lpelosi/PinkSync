@@ -14,6 +14,7 @@ struct GameDetailView: View {
     @State private var isSending = false
     @State private var showingGoaliePicker = false
     @State private var showingSummary = false
+    @State private var showingStatsEditor = false
     @State private var showingLiveCheckIn = false
     @State private var liveVM: LiveGameViewModel?
     @State private var pendingCheckedIn: [Player]?
@@ -149,6 +150,24 @@ struct GameDetailView: View {
                 }
             }
 
+            // MARK: - Edit Stats
+            if authManager.canManageGames && !game.playerStats.isEmpty {
+                Section {
+                    Button {
+                        showingStatsEditor = true
+                    } label: {
+                        HStack {
+                            Spacer()
+                            Label("Edit Stats", systemImage: "pencil.and.list.clipboard")
+                                .font(.headline)
+                            Spacer()
+                        }
+                        .padding(.vertical, 4)
+                    }
+                    .foregroundStyle(AppTheme.teal)
+                }
+            }
+
             // MARK: - Game Summary
             Section {
                 Button {
@@ -210,6 +229,11 @@ struct GameDetailView: View {
         .sheet(isPresented: $showingSummary) {
             NavigationStack {
                 GameSummaryView(game: game)
+            }
+        }
+        .sheet(isPresented: $showingStatsEditor) {
+            NavigationStack {
+                GameStatsEditorView(game: game)
             }
         }
         .sheet(isPresented: $showingLiveCheckIn, onDismiss: {

@@ -59,6 +59,10 @@ final class Player {
     var totalBlocks: Int { gameStats.reduce(0) { $0 + $1.blocks } }
     var totalPenaltyMinutes: Int { gameStats.reduce(0) { $0 + $1.penaltyMinutes } }
     var totalPowerPlayGoals: Int { gameStats.reduce(0) { $0 + $1.powerPlayGoals } }
+    var totalShortHandedGoals: Int { gameStats.reduce(0) { $0 + $1.shortHandedGoals } }
+    var totalPowerPlayAssists: Int { gameStats.reduce(0) { $0 + $1.powerPlayAssists } }
+    var totalShortHandedAssists: Int { gameStats.reduce(0) { $0 + $1.shortHandedAssists } }
+    var totalGameWinningGoals: Int { gameStats.reduce(0) { $0 + $1.gameWinningGoals } }
     var totalFaceoffWins: Int { gameStats.reduce(0) { $0 + $1.faceoffWins } }
     var totalFaceoffLosses: Int { gameStats.reduce(0) { $0 + $1.faceoffLosses } }
     var faceoffPercentage: Double {

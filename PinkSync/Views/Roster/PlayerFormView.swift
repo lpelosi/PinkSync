@@ -43,7 +43,7 @@ struct PlayerFormView: View {
     @State private var showError = false
     @State private var photoLoadError: String?
 
-    private let positions = ["Goalie", "Defense", "Forward", "Center", "Left Wing", "Right Wing"]
+    private let positions = ["Goalie", "Defense", "Left Defense", "Right Defense", "Forward", "Center", "Left Wing", "Right Wing"]
 
     private var isEditing: Bool {
         if case .edit = mode { return true }

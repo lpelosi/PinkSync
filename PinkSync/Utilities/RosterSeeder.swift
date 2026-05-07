@@ -130,11 +130,15 @@ enum RosterSeeder {
     static func seedOpponentTeamsIfNeeded(modelContext: ModelContext) {
         let descriptor = FetchDescriptor<OpponentTeam>()
         let existing = (try? modelContext.fetch(descriptor)) ?? []
-        let existingNames = Set(existing.map(\.name))
-
+        let existingByName = Dictionary(existing.map { ($0.name, $0) }, uniquingKeysWith: { first, _ in first })
         var changed = false
         for seed in OpponentTeam.seedTeams {
-            if !existingNames.contains(seed.name) {
+            if let team = existingByName[seed.name] {
+                if team.logoAsset == nil, let asset = seed.logoAsset {
+                    team.logoAsset = asset
+                    changed = true
+                }
+            } else {
                 let team = OpponentTeam(name: seed.name, logoAsset: seed.logoAsset)
                 modelContext.insert(team)
                 changed = true

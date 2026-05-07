@@ -3,6 +3,8 @@ import Foundation
 enum Position: String, Codable, CaseIterable, Identifiable {
     case goalie = "Goalie"
     case defense = "Defense"
+    case leftDefense = "Left Defense"
+    case rightDefense = "Right Defense"
     case forward = "Forward"
     case center = "Center"
     case leftWing = "Left Wing"

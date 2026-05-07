@@ -5,19 +5,35 @@ struct LiveGameView: View {
     @Bindable var vm: LiveGameViewModel
     let onEnd: () -> Void
 
+    private enum ActiveSheet: Identifiable {
+        case playerPicker
+        case goalFlow
+        case penaltyEntry
+        case opponentPenalty
+        case goalAgainstTime
+        case faceoffPicker
+        case shootoutPlayerPicker
+        case lineSetup
+        case periodSummary
+        case editEvent(Int)
+        case clockEdit
+
+        var id: String {
+            switch self {
+            case .editEvent(let idx): return "editEvent_\(idx)"
+            default: return String(describing: self)
+            }
+        }
+    }
+
+    @State private var activeSheet: ActiveSheet?
     @State private var showingEndConfirm = false
-    @State private var showingPlayerPicker = false
-    @State private var showingGoalFlow = false
-    @State private var showingPenaltyEntry = false
-    @State private var showingOpponentPenalty = false
-    @State private var showingShootoutPlayerPicker = false
-    @State private var showingGoalAgainstTime = false
-    @State private var showingFaceoffPicker = false
-    @State private var showingLineSetup = false
-    @State private var showingPeriodSummary = false
+    @State private var showingDeleteConfirm = false
     @State private var goalAgainstClockTime = ""
     @State private var pendingAction: LiveAction?
     @State private var eventToDelete: Int?
+    @State private var editClockMinutes = 0
+    @State private var editClockSeconds = 0
 
     var body: some View {
         ZStack {
@@ -57,10 +73,7 @@ struct LiveGameView: View {
             let result = autoResultLabel
             Text("Result: \(result). Stats have been saved.")
         }
-        .alert("Delete Event?", isPresented: Binding(
-            get: { eventToDelete != nil },
-            set: { if !$0 { eventToDelete = nil } }
-        )) {
+        .alert("Delete Event?", isPresented: $showingDeleteConfirm) {
             Button("Cancel", role: .cancel) { eventToDelete = nil }
             Button("Delete", role: .destructive) {
                 if let idx = eventToDelete {
@@ -73,87 +86,97 @@ struct LiveGameView: View {
                 Text(vm.events[idx].description)
             }
         }
-        .sheet(isPresented: $showingPlayerPicker) {
-            LivePlayerPickerView(
-                players: vm.filteredSkaters,
-                title: pickerTitle,
-                skipLabel: nil,
-                excluded: []
-            ) { player in
-                guard let player else { return }
-                switch pendingAction {
-                case .shot: vm.recordShot(player: player)
-                case .hit: vm.recordHit(player: player)
-                case .block: vm.recordBlock(player: player)
-                default: break
+        .sheet(item: $activeSheet) { sheet in
+            switch sheet {
+            case .playerPicker:
+                LivePlayerPickerView(
+                    players: vm.filteredSkaters,
+                    title: pickerTitle,
+                    skipLabel: nil,
+                    excluded: []
+                ) { player in
+                    guard let player else { return }
+                    switch pendingAction {
+                    case .shot: vm.recordShot(player: player)
+                    case .hit: vm.recordHit(player: player)
+                    case .block: vm.recordBlock(player: player)
+                    default: break
+                    }
+                    pendingAction = nil
                 }
-                pendingAction = nil
-            }
-            .presentationDetents([.medium])
-        }
-        .sheet(isPresented: $showingGoalFlow) {
-            GoalFlowSheet(vm: vm) {
-                showingGoalFlow = false
-            }
-            .presentationDetents([.medium, .large])
-        }
-        .sheet(isPresented: $showingPenaltyEntry) {
-            PenaltyEntryView(
-                isOurs: true,
-                players: vm.filteredSkaters,
-                excluded: []
-            ) { player, _, type, clockTime in
-                if let player {
-                    vm.recordPenalty(player: player, type: type, clockTime: clockTime)
-                }
-            }
-            .presentationDetents([.large])
-        }
-        .sheet(isPresented: $showingOpponentPenalty) {
-            PenaltyEntryView(
-                isOurs: false,
-                players: [],
-                excluded: []
-            ) { _, number, type, clockTime in
-                vm.recordOpponentPenalty(jerseyNumber: number, type: type, clockTime: clockTime)
-            }
-            .presentationDetents([.medium])
-        }
-        .sheet(isPresented: $showingGoalAgainstTime) {
-            GoalAgainstTimeSheet(clockTime: $goalAgainstClockTime) { isPowerPlay in
-                vm.recordGoalAgainst(clockTime: goalAgainstClockTime, isPowerPlay: isPowerPlay)
-                goalAgainstClockTime = ""
-                showingGoalAgainstTime = false
-            }
-            .presentationDetents([.medium])
-        }
-        .sheet(isPresented: $showingFaceoffPicker) {
-            FaceoffPickerSheet(vm: vm)
                 .presentationDetents([.medium])
-        }
-        .sheet(isPresented: $showingShootoutPlayerPicker) {
-            LivePlayerPickerView(
-                players: vm.skaters,
-                title: "Who's shooting?",
-                skipLabel: nil,
-                excluded: []
-            ) { player in
-                guard let player else { return }
-                shootoutPlayerPicked = player
-                showingShootoutResult = true
-            }
-            .presentationDetents([.medium])
-        }
-        .sheet(isPresented: $showingLineSetup) {
-            LineSetupSheet(vm: vm)
+            case .goalFlow:
+                GoalFlowSheet(vm: vm) {
+                    activeSheet = nil
+                }
+                .presentationDetents([.medium, .large])
+            case .penaltyEntry:
+                PenaltyEntryView(
+                    isOurs: true,
+                    players: vm.filteredSkaters,
+                    excluded: []
+                ) { player, _, type, clockTime in
+                    if let player {
+                        vm.recordPenalty(player: player, type: type, clockTime: clockTime)
+                    }
+                }
                 .presentationDetents([.large])
-        }
-        .sheet(isPresented: $showingPeriodSummary) {
-            PeriodSummarySheet(summary: vm.currentPeriodSummary()) {
-                showingPeriodSummary = false
-                vm.endPeriod()
+            case .opponentPenalty:
+                PenaltyEntryView(
+                    isOurs: false,
+                    players: [],
+                    excluded: []
+                ) { _, number, type, clockTime in
+                    vm.recordOpponentPenalty(jerseyNumber: number, type: type, clockTime: clockTime)
+                }
+                .presentationDetents([.medium])
+            case .goalAgainstTime:
+                GoalAgainstTimeSheet(clockTime: $goalAgainstClockTime, defaultPowerPlay: vm.shortHanded) { isPowerPlay in
+                    vm.recordGoalAgainst(clockTime: goalAgainstClockTime, isPowerPlay: isPowerPlay)
+                    goalAgainstClockTime = ""
+                    activeSheet = nil
+                }
+                .presentationDetents([.medium])
+            case .faceoffPicker:
+                FaceoffPickerSheet(vm: vm)
+                    .presentationDetents([.medium])
+            case .shootoutPlayerPicker:
+                LivePlayerPickerView(
+                    players: vm.skaters,
+                    title: "Who's shooting?",
+                    skipLabel: nil,
+                    excluded: []
+                ) { player in
+                    guard let player else { return }
+                    shootoutPlayerPicked = player
+                    showingShootoutResult = true
+                }
+                .presentationDetents([.medium])
+            case .lineSetup:
+                LineSetupSheet(vm: vm)
+                    .presentationDetents([.large])
+            case .periodSummary:
+                PeriodSummarySheet(summary: vm.currentPeriodSummary()) {
+                    activeSheet = nil
+                    vm.endPeriod()
+                }
+                .presentationDetents([.medium])
+            case .editEvent(let index):
+                EventEditSheet(vm: vm, eventIndex: index) {
+                    activeSheet = nil
+                } onDelete: {
+                    activeSheet = nil
+                    eventToDelete = index
+                    showingDeleteConfirm = true
+                }
+                .presentationDetents([.medium, .large])
+            case .clockEdit:
+                ClockEditSheet(minutes: $editClockMinutes, seconds: $editClockSeconds) {
+                    vm.setClockTime(minutes: editClockMinutes, seconds: editClockSeconds)
+                    activeSheet = nil
+                }
+                .presentationDetents([.medium])
             }
-            .presentationDetents([.medium])
         }
         .alert("Result?", isPresented: $showingShootoutResult) {
             Button("Goal") {
@@ -195,8 +218,9 @@ struct LiveGameView: View {
     // MARK: - Scoreboard
 
     private var scoreboard: some View {
-        VStack(spacing: 8) {
-            HStack {
+        VStack(spacing: 4) {
+            // Top bar: period + clock + controls
+            HStack(spacing: 8) {
                 Text(periodDisplayLabel)
                     .font(.caption.bold())
                     .padding(.horizontal, 10)
@@ -204,13 +228,38 @@ struct LiveGameView: View {
                     .background(periodColor.opacity(0.2), in: Capsule())
                     .foregroundStyle(periodColor)
 
+                if vm.isClockSetUp {
+                    Button {
+                        editClockMinutes = vm.clockSeconds / 60
+                        editClockSeconds = vm.clockSeconds % 60
+                        activeSheet = .clockEdit
+                    } label: {
+                        Text(vm.clockDisplay)
+                            .font(.system(size: 28, weight: .bold, design: .monospaced))
+                            .foregroundStyle(vm.clockRunning ? .primary : .secondary)
+                            .contentTransition(.numericText())
+                    }
+
+                    Button {
+                        vm.toggleClock()
+                    } label: {
+                        Image(systemName: vm.clockRunning ? "pause.fill" : "play.fill")
+                            .font(.system(size: 14, weight: .bold))
+                            .foregroundStyle(.white)
+                            .frame(width: 32, height: 32)
+                            .background(vm.clockRunning ? .orange : .green, in: Circle())
+                    }
+                } else {
+                    clockSetupMenu
+                }
+
                 Spacer()
 
                 Button {
-                    showingLineSetup = true
+                    activeSheet = .lineSetup
                 } label: {
                     Image(systemName: "person.3.fill")
-                        .font(.subheadline)
+                        .font(.system(size: 13))
                         .foregroundStyle(.secondary)
                         .padding(8)
                         .background(Color(.systemGray5), in: Circle())
@@ -219,10 +268,10 @@ struct LiveGameView: View {
                 Button {
                     showingEndConfirm = true
                 } label: {
-                    Text("End Game")
-                        .font(.subheadline.bold())
+                    Text("End")
+                        .font(.system(size: 13, weight: .bold))
                         .foregroundStyle(.white)
-                        .padding(.horizontal, 16)
+                        .padding(.horizontal, 12)
                         .padding(.vertical, 8)
                         .background(.red.opacity(0.8), in: Capsule())
                 }
@@ -230,32 +279,95 @@ struct LiveGameView: View {
             .padding(.horizontal)
             .padding(.top, 8)
 
+            // Score
             HStack(spacing: 20) {
-                VStack {
+                VStack(spacing: 2) {
                     Text("FF")
                         .font(.caption.bold())
                         .foregroundStyle(AppTheme.pink)
                     Text("\(vm.game.goalsFor)")
-                        .font(.system(size: 48, weight: .bold, design: .monospaced))
+                        .font(.system(size: 44, weight: .bold, design: .monospaced))
                         .foregroundStyle(AppTheme.pink)
+                    Text("SOG: \(vm.totalShotsFor)")
+                        .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                        .foregroundStyle(.secondary)
                 }
 
                 Text("—")
-                    .font(.system(size: 32, weight: .light))
+                    .font(.system(size: 28, weight: .light))
                     .foregroundStyle(.secondary)
 
-                VStack {
+                VStack(spacing: 2) {
                     Text(abbreviate(vm.game.opponent))
                         .font(.caption.bold())
                         .foregroundStyle(AppTheme.teal)
                     Text("\(vm.game.goalsAgainst)")
-                        .font(.system(size: 48, weight: .bold, design: .monospaced))
+                        .font(.system(size: 44, weight: .bold, design: .monospaced))
                         .foregroundStyle(AppTheme.teal)
+                    Text("SOG: \(vm.totalShotsAgainst)")
+                        .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                        .foregroundStyle(.secondary)
                 }
             }
-            .padding(.bottom, 8)
+
+            // Penalty timers
+            if !vm.activePenalties.isEmpty {
+                penaltyTimersBar
+            }
         }
+        .padding(.bottom, 6)
         .background(Color(.systemGray6))
+    }
+
+    private var clockSetupMenu: some View {
+        Menu {
+            Button("12:00 (12 min)") { vm.setupClock(minutes: 12) }
+            Button("15:00 (15 min)") { vm.setupClock(minutes: 15) }
+            Button("20:00 (20 min)") { vm.setupClock(minutes: 20) }
+            Button("25:00 (25 min)") { vm.setupClock(minutes: 25) }
+        } label: {
+            Label("Set Clock", systemImage: "clock")
+                .font(.system(size: 13, weight: .bold))
+                .foregroundStyle(.white)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 6)
+                .background(AppTheme.teal, in: Capsule())
+        }
+    }
+
+    private var penaltyTimersBar: some View {
+        HStack(spacing: 0) {
+            // Our penalties (left side)
+            VStack(alignment: .leading, spacing: 2) {
+                ForEach(vm.ourPenalties) { penalty in
+                    HStack(spacing: 4) {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.system(size: 10))
+                        Text(penalty.display)
+                            .font(.system(size: 12, weight: .bold, design: .monospaced))
+                    }
+                    .foregroundStyle(AppTheme.pink)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            // Their penalties (right side)
+            VStack(alignment: .trailing, spacing: 2) {
+                ForEach(vm.theirPenalties) { penalty in
+                    HStack(spacing: 4) {
+                        Text(penalty.display)
+                            .font(.system(size: 12, weight: .bold, design: .monospaced))
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.system(size: 10))
+                    }
+                    .foregroundStyle(AppTheme.teal)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .trailing)
+        }
+        .padding(.horizontal)
+        .padding(.vertical, 4)
+        .background(Color.black.opacity(0.3))
     }
 
     private var periodDisplayLabel: String {
@@ -278,16 +390,25 @@ struct LiveGameView: View {
 
     @ViewBuilder
     private var lineFilterBar: some View {
-        let lines = vm.configuredLineNumbers
-        if !lines.isEmpty {
+        let fwdLines = vm.configuredForwardLines
+        let defPairings = vm.configuredDefensePairings
+        if !fwdLines.isEmpty || !defPairings.isEmpty {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 8) {
                     lineFilterPill("All", isActive: vm.activeLineFilter == nil) {
                         vm.activeLineFilter = nil
                     }
-                    ForEach(lines, id: \.self) { line in
-                        lineFilterPill("L\(line)", isActive: vm.activeLineFilter == line) {
+                    ForEach(fwdLines, id: \.self) { line in
+                        lineFilterPill(line, color: AppTheme.pink, isActive: vm.activeLineFilter == line) {
                             vm.activeLineFilter = (vm.activeLineFilter == line) ? nil : line
+                        }
+                    }
+                    if !fwdLines.isEmpty && !defPairings.isEmpty {
+                        Divider().frame(height: 20)
+                    }
+                    ForEach(defPairings, id: \.self) { pair in
+                        lineFilterPill(pair, color: AppTheme.teal, isActive: vm.activeLineFilter == pair) {
+                            vm.activeLineFilter = (vm.activeLineFilter == pair) ? nil : pair
                         }
                     }
                 }
@@ -298,14 +419,14 @@ struct LiveGameView: View {
         }
     }
 
-    private func lineFilterPill(_ label: String, isActive: Bool, action: @escaping () -> Void) -> some View {
+    private func lineFilterPill(_ label: String, color: Color = AppTheme.pink, isActive: Bool, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Text(label)
                 .font(.system(size: 13, weight: .bold))
                 .foregroundStyle(isActive ? .white : .secondary)
                 .padding(.horizontal, 14)
                 .padding(.vertical, 6)
-                .background(isActive ? AppTheme.pink : Color(.systemGray5), in: Capsule())
+                .background(isActive ? color : Color(.systemGray5), in: Capsule())
         }
     }
 
@@ -319,25 +440,25 @@ struct LiveGameView: View {
                     .foregroundStyle(AppTheme.pink)
                 actionButton("Shot", emoji: "🏒", color: AppTheme.pink) {
                     pendingAction = .shot
-                    showingPlayerPicker = true
+                    activeSheet = .playerPicker
                 }
                 actionButton("Goal", emoji: "🚨", color: AppTheme.pink) {
                     vm.startGoalFlow()
-                    showingGoalFlow = true
+                    activeSheet = .goalFlow
                 }
                 actionButton("Hit", emoji: "💥", color: AppTheme.pink) {
                     pendingAction = .hit
-                    showingPlayerPicker = true
+                    activeSheet = .playerPicker
                 }
                 actionButton("Block", emoji: "🛡️", color: AppTheme.pink) {
                     pendingAction = .block
-                    showingPlayerPicker = true
+                    activeSheet = .playerPicker
                 }
                 actionButton("Faceoff", emoji: "🏑", color: AppTheme.pink) {
-                    showingFaceoffPicker = true
+                    activeSheet = .faceoffPicker
                 }
                 actionButton("Penalty", emoji: "🚫", color: AppTheme.pink) {
-                    showingPenaltyEntry = true
+                    activeSheet = .penaltyEntry
                 }
             }
 
@@ -350,10 +471,10 @@ struct LiveGameView: View {
                 }
                 actionButton("Goal", emoji: "🚨", color: AppTheme.teal) {
                     goalAgainstClockTime = ""
-                    showingGoalAgainstTime = true
+                    activeSheet = .goalAgainstTime
                 }
                 actionButton("Penalty", emoji: "🚫", color: AppTheme.teal) {
-                    showingOpponentPenalty = true
+                    activeSheet = .opponentPenalty
                 }
             }
         }
@@ -404,7 +525,7 @@ struct LiveGameView: View {
     private var periodTransitionButton: some View {
         if vm.period == .regulation && vm.currentPeriod < 3 {
             Button {
-                showingPeriodSummary = true
+                activeSheet = .periodSummary
             } label: {
                 Label("End \(vm.periodLabel) Period", systemImage: "forward.end.fill")
                     .font(.system(size: 14, weight: .bold))
@@ -460,7 +581,7 @@ struct LiveGameView: View {
                         .font(.caption.bold())
                         .foregroundStyle(AppTheme.pink)
                     Button {
-                        showingShootoutPlayerPicker = true
+                        activeSheet = .shootoutPlayerPicker
                     } label: {
                         HStack {
                             Text("🎯")
@@ -521,8 +642,8 @@ struct LiveGameView: View {
                 LazyVStack(alignment: .leading, spacing: 6) {
                     ForEach(Array(vm.events.enumerated()), id: \.element.id) { index, event in
                         Button {
-                            if event.undoClosure != nil {
-                                eventToDelete = index
+                            if event.gameEvent != nil {
+                                activeSheet = .editEvent(index)
                             }
                         } label: {
                             HStack(spacing: 8) {
@@ -532,8 +653,8 @@ struct LiveGameView: View {
                                     .font(.system(size: 14, weight: .medium))
                                     .foregroundStyle(.primary)
                                 Spacer()
-                                if event.undoClosure != nil {
-                                    Image(systemName: "xmark.circle.fill")
+                                if event.gameEvent != nil {
+                                    Image(systemName: "pencil.circle.fill")
                                         .font(.system(size: 14))
                                         .foregroundStyle(.secondary.opacity(0.4))
                                 }
@@ -620,6 +741,7 @@ struct LiveGameView: View {
 
 private struct GoalAgainstTimeSheet: View {
     @Binding var clockTime: String
+    let defaultPowerPlay: Bool
     let onRecord: (Bool) -> Void
     @Environment(\.dismiss) private var dismiss
     @State private var isPowerPlay = false
@@ -653,6 +775,7 @@ private struct GoalAgainstTimeSheet: View {
                 }
             }
             .padding()
+            .onAppear { isPowerPlay = defaultPowerPlay }
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") { dismiss() }
@@ -747,32 +870,93 @@ private struct LineSetupSheet: View {
     @Bindable var vm: LiveGameViewModel
     @Environment(\.dismiss) private var dismiss
 
+    private var forwards: [Player] {
+        vm.skaters.filter { $0.position == "Forward" || $0.position == "Center" || $0.position == "Left Wing" || $0.position == "Right Wing" }
+    }
+
+    private var defensemen: [Player] {
+        vm.skaters.filter { $0.position == "Defense" || $0.position == "Left Defense" || $0.position == "Right Defense" }
+    }
+
+    private var unassigned: [Player] {
+        vm.skaters.filter { p in !forwards.contains(where: { $0.id == p.id }) && !defensemen.contains(where: { $0.id == p.id }) }
+    }
+
     var body: some View {
         NavigationStack {
             List {
                 Section {
-                    Text("Assign players to lines for quick filtering.")
+                    Text("Assign forwards to lines and defensemen to pairings.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
 
-                ForEach(vm.skaters) { player in
-                    HStack {
-                        Text(player.number > 0 ? "#\(player.number)" : "--")
-                            .font(.system(.body, design: .monospaced, weight: .bold))
-                            .frame(width: 40)
-                        Text(player.name)
-                            .lineLimit(1)
-                        Spacer()
-                        Picker("Line", selection: lineBinding(for: player)) {
-                            Text("—").tag(0)
-                            Text("L1").tag(1)
-                            Text("L2").tag(2)
-                            Text("L3").tag(3)
-                            Text("L4").tag(4)
+                Section("Forwards") {
+                    ForEach(forwards) { player in
+                        HStack {
+                            Text(player.number > 0 ? "#\(player.number)" : "--")
+                                .font(.system(.body, design: .monospaced, weight: .bold))
+                                .frame(width: 40)
+                            Text(player.name)
+                                .lineLimit(1)
+                            Spacer()
+                            Picker("Line", selection: lineBinding(for: player)) {
+                                Text("—").tag("")
+                                Text("F1").tag("F1")
+                                Text("F2").tag("F2")
+                                Text("F3").tag("F3")
+                                Text("F4").tag("F4")
+                            }
+                            .pickerStyle(.segmented)
+                            .frame(width: 200)
                         }
-                        .pickerStyle(.segmented)
-                        .frame(width: 200)
+                    }
+                }
+
+                Section("Defense") {
+                    ForEach(defensemen) { player in
+                        HStack {
+                            Text(player.number > 0 ? "#\(player.number)" : "--")
+                                .font(.system(.body, design: .monospaced, weight: .bold))
+                                .frame(width: 40)
+                            Text(player.name)
+                                .lineLimit(1)
+                            Spacer()
+                            Picker("Pairing", selection: lineBinding(for: player)) {
+                                Text("—").tag("")
+                                Text("D1").tag("D1")
+                                Text("D2").tag("D2")
+                                Text("D3").tag("D3")
+                            }
+                            .pickerStyle(.segmented)
+                            .frame(width: 160)
+                        }
+                    }
+                }
+
+                if !unassigned.isEmpty {
+                    Section("Other") {
+                        ForEach(unassigned) { player in
+                            HStack {
+                                Text(player.number > 0 ? "#\(player.number)" : "--")
+                                    .font(.system(.body, design: .monospaced, weight: .bold))
+                                    .frame(width: 40)
+                                Text(player.name)
+                                    .lineLimit(1)
+                                Spacer()
+                                Picker("Line", selection: lineBinding(for: player)) {
+                                    Text("—").tag("")
+                                    Text("F1").tag("F1")
+                                    Text("F2").tag("F2")
+                                    Text("F3").tag("F3")
+                                    Text("F4").tag("F4")
+                                    Text("D1").tag("D1")
+                                    Text("D2").tag("D2")
+                                    Text("D3").tag("D3")
+                                }
+                                .pickerStyle(.menu)
+                            }
+                        }
                     }
                 }
             }
@@ -787,11 +971,11 @@ private struct LineSetupSheet: View {
         }
     }
 
-    private func lineBinding(for player: Player) -> Binding<Int> {
+    private func lineBinding(for player: Player) -> Binding<String> {
         Binding(
-            get: { vm.playerLines[player.persistentModelID] ?? 0 },
+            get: { vm.playerLines[player.persistentModelID] ?? "" },
             set: { newValue in
-                if newValue == 0 {
+                if newValue.isEmpty {
                     vm.playerLines.removeValue(forKey: player.persistentModelID)
                 } else {
                     vm.playerLines[player.persistentModelID] = newValue
@@ -948,11 +1132,12 @@ private struct GoalFlowSheet: View {
 
             ClockTimeField(time: Bindable(vm).pendingClockTime)
 
-            Toggle(isOn: Bindable(vm).pendingIsPowerPlay) {
-                Label("Power Play Goal", systemImage: "bolt.fill")
-                    .font(.subheadline.bold())
+            Picker("Strength", selection: Bindable(vm).pendingGoalStrength) {
+                Text("Even").tag(0)
+                Text("PP").tag(1)
+                Text("SH").tag(2)
             }
-            .tint(AppTheme.pink)
+            .pickerStyle(.segmented)
             .padding(.horizontal)
 
             HStack(spacing: 16) {
@@ -1012,5 +1197,380 @@ private struct GoalFlowSheet: View {
 
     private func lastName(_ name: String) -> String {
         name.components(separatedBy: " ").last ?? name
+    }
+}
+
+// MARK: - Event Edit Sheet
+
+private struct EventEditSheet: View {
+    @Bindable var vm: LiveGameViewModel
+    let eventIndex: Int
+    let onSave: () -> Void
+    let onDelete: () -> Void
+    @Environment(\.dismiss) private var dismiss
+
+    @State private var selectedPlayer: Player?
+    @State private var selectedAssist1: Player?
+    @State private var selectedAssist2: Player?
+    @State private var clockTime: String = ""
+    @State private var goalStrength: Int = 0 // 0=ES, 1=PP, 2=SH
+    @State private var selectedPenaltyType: PenaltyType = .minor
+    @State private var faceoffWon: Bool = true
+    @State private var opponentNumber: String = ""
+    @State private var period: Int = 1
+
+    private var gameEvent: GameEvent? {
+        guard vm.events.indices.contains(eventIndex) else { return nil }
+        return vm.events[eventIndex].gameEvent
+    }
+
+    private var eventType: String {
+        gameEvent?.type ?? ""
+    }
+
+    private var isGoal: Bool { eventType == "goal" }
+    private var isPenalty: Bool { eventType == "penalty" }
+    private var isGoalAgainst: Bool { eventType == "goalAgainst" }
+    private var isPenaltyAgainst: Bool { eventType == "penaltyAgainst" }
+    private var isFaceoff: Bool { eventType == "faceoffWin" || eventType == "faceoffLoss" }
+    private var isPlayerEvent: Bool { ["shot", "goal", "hit", "block", "faceoffWin", "faceoffLoss", "penalty"].contains(eventType) }
+
+    private var eventLabel: String {
+        switch eventType {
+        case "shot": "Shot"
+        case "goal": "Goal"
+        case "hit": "Hit"
+        case "block": "Block"
+        case "faceoffWin", "faceoffLoss": "Faceoff"
+        case "penalty": "Penalty"
+        case "shotAgainst": "Shot Against"
+        case "goalAgainst": "Goal Against"
+        case "penaltyAgainst": "Opponent Penalty"
+        default: "Event"
+        }
+    }
+
+    private let columns = [GridItem(.adaptive(minimum: 80), spacing: 12)]
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(spacing: 20) {
+                    Text(eventLabel)
+                        .font(.title2.bold())
+                        .foregroundStyle(isGoalAgainst || isPenaltyAgainst ? AppTheme.teal : AppTheme.pink)
+
+                    Picker("Period", selection: $period) {
+                        Text("1st").tag(1)
+                        Text("2nd").tag(2)
+                        Text("3rd").tag(3)
+                        Text("OT").tag(4)
+                    }
+                    .pickerStyle(.segmented)
+                    .padding(.horizontal)
+
+                    if isPlayerEvent {
+                        playerPickerSection
+                    }
+
+                    if isGoal {
+                        assistPickerSection
+                    }
+
+                    if isGoal || isGoalAgainst || isPenalty || isPenaltyAgainst {
+                        VStack(spacing: 8) {
+                            Text("Clock Time")
+                                .font(.caption.bold())
+                                .foregroundStyle(.secondary)
+                            ClockTimeField(time: $clockTime)
+                        }
+                    }
+
+                    if isGoal {
+                        Picker("Strength", selection: $goalStrength) {
+                            Text("Even").tag(0)
+                            Text("PP").tag(1)
+                            Text("SH").tag(2)
+                        }
+                        .pickerStyle(.segmented)
+                        .padding(.horizontal)
+                    }
+
+                    if isGoalAgainst {
+                        Toggle(isOn: Binding(
+                            get: { goalStrength == 1 },
+                            set: { goalStrength = $0 ? 1 : 0 }
+                        )) {
+                            Label("Power Play Goal", systemImage: "bolt.fill")
+                                .font(.subheadline.bold())
+                        }
+                        .tint(AppTheme.teal)
+                        .padding(.horizontal)
+                    }
+
+                    if isPenalty || isPenaltyAgainst {
+                        Picker("Penalty Type", selection: $selectedPenaltyType) {
+                            ForEach(PenaltyType.allCases) { type in
+                                Text(type.rawValue).tag(type)
+                            }
+                        }
+                        .pickerStyle(.segmented)
+                        .padding(.horizontal)
+                    }
+
+                    if isPenaltyAgainst {
+                        HStack {
+                            Text("Opponent #")
+                                .font(.subheadline.bold())
+                            TextField("Jersey #", text: $opponentNumber)
+                                .keyboardType(.numberPad)
+                                .textFieldStyle(.roundedBorder)
+                                .frame(width: 80)
+                        }
+                        .padding(.horizontal)
+                    }
+
+                    if isFaceoff {
+                        Picker("Result", selection: $faceoffWon) {
+                            Text("Won").tag(true)
+                            Text("Lost").tag(false)
+                        }
+                        .pickerStyle(.segmented)
+                        .padding(.horizontal)
+                    }
+
+                    HStack(spacing: 16) {
+                        Button(role: .destructive) {
+                            onDelete()
+                        } label: {
+                            Label("Delete", systemImage: "trash")
+                                .font(.headline)
+                                .foregroundStyle(.white)
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 14)
+                                .background(.red, in: RoundedRectangle(cornerRadius: 12))
+                        }
+
+                        Button {
+                            saveEdits()
+                        } label: {
+                            Text("Save")
+                                .font(.headline)
+                                .foregroundStyle(.white)
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 14)
+                                .background(AppTheme.pink, in: RoundedRectangle(cornerRadius: 12))
+                        }
+                    }
+                    .padding(.horizontal)
+                    .padding(.top, 8)
+                }
+                .padding(.top, 16)
+            }
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                }
+            }
+            .onAppear { loadFromEvent() }
+        }
+    }
+
+    private var playerPickerSection: some View {
+        VStack(spacing: 8) {
+            Text("Player")
+                .font(.caption.bold())
+                .foregroundStyle(.secondary)
+
+            LazyVGrid(columns: columns, spacing: 10) {
+                ForEach(vm.skaters) { player in
+                    Button {
+                        selectedPlayer = player
+                    } label: {
+                        VStack(spacing: 2) {
+                            Text(player.number > 0 ? "\(player.number)" : "—")
+                                .font(.system(size: 22, weight: .bold, design: .monospaced))
+                                .foregroundStyle(.white)
+                            Text(player.name.components(separatedBy: " ").last ?? player.name)
+                                .font(.system(size: 10, weight: .medium))
+                                .foregroundStyle(.white.opacity(0.8))
+                                .lineLimit(1)
+                        }
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 55)
+                        .background(selectedPlayer?.persistentModelID == player.persistentModelID ? AppTheme.pink : Color(.systemGray3), in: RoundedRectangle(cornerRadius: 10))
+                    }
+                }
+            }
+            .padding(.horizontal)
+        }
+    }
+
+    @ViewBuilder
+    private var assistPickerSection: some View {
+        VStack(spacing: 8) {
+            HStack {
+                Text("Primary Assist")
+                    .font(.caption.bold())
+                    .foregroundStyle(.secondary)
+                Spacer()
+                if selectedAssist1 != nil {
+                    Button("Clear") { selectedAssist1 = nil }
+                        .font(.caption)
+                        .foregroundStyle(AppTheme.teal)
+                }
+            }
+            .padding(.horizontal)
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    ForEach(vm.skaters.filter { $0.persistentModelID != selectedPlayer?.persistentModelID && $0.persistentModelID != selectedAssist2?.persistentModelID }) { player in
+                        Button {
+                            selectedAssist1 = player
+                        } label: {
+                            Text(player.number > 0 ? "#\(player.number)" : "—")
+                                .font(.system(size: 14, weight: .bold, design: .monospaced))
+                                .foregroundStyle(.white)
+                                .frame(width: 50, height: 36)
+                                .background(selectedAssist1?.persistentModelID == player.persistentModelID ? AppTheme.pink : Color(.systemGray3), in: RoundedRectangle(cornerRadius: 8))
+                        }
+                    }
+                }
+                .padding(.horizontal)
+            }
+        }
+
+        VStack(spacing: 8) {
+            HStack {
+                Text("Secondary Assist")
+                    .font(.caption.bold())
+                    .foregroundStyle(.secondary)
+                Spacer()
+                if selectedAssist2 != nil {
+                    Button("Clear") { selectedAssist2 = nil }
+                        .font(.caption)
+                        .foregroundStyle(AppTheme.teal)
+                }
+            }
+            .padding(.horizontal)
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    ForEach(vm.skaters.filter { $0.persistentModelID != selectedPlayer?.persistentModelID && $0.persistentModelID != selectedAssist1?.persistentModelID }) { player in
+                        Button {
+                            selectedAssist2 = player
+                        } label: {
+                            Text(player.number > 0 ? "#\(player.number)" : "—")
+                                .font(.system(size: 14, weight: .bold, design: .monospaced))
+                                .foregroundStyle(.white)
+                                .frame(width: 50, height: 36)
+                                .background(selectedAssist2?.persistentModelID == player.persistentModelID ? AppTheme.pink : Color(.systemGray3), in: RoundedRectangle(cornerRadius: 8))
+                        }
+                    }
+                }
+                .padding(.horizontal)
+            }
+        }
+    }
+
+    private func loadFromEvent() {
+        guard let event = gameEvent else { return }
+        period = event.period
+        clockTime = event.clockTime
+        if event.isPowerPlay { goalStrength = 1 }
+        else if event.isShortHanded { goalStrength = 2 }
+        else { goalStrength = 0 }
+        opponentNumber = event.opponentNumber
+        faceoffWon = event.type == "faceoffWin"
+
+        if let pType = PenaltyType(rawValue: event.penaltyType) {
+            selectedPenaltyType = pType
+        }
+
+        selectedPlayer = vm.findPlayer(named: event.playerName, number: event.playerNumber)
+
+        if !event.assist1Name.isEmpty {
+            selectedAssist1 = vm.findPlayer(named: event.assist1Name, number: event.assist1Number)
+        }
+        if !event.assist2Name.isEmpty {
+            selectedAssist2 = vm.findPlayer(named: event.assist2Name, number: event.assist2Number)
+        }
+    }
+
+    private func saveEdits() {
+        vm.replaceEvent(
+            at: eventIndex,
+            player: selectedPlayer,
+            clockTime: clockTime,
+            isPowerPlay: goalStrength == 1,
+            isShortHanded: goalStrength == 2,
+            assist1: selectedAssist1,
+            assist2: selectedAssist2,
+            penaltyType: (isPenalty || isPenaltyAgainst) ? selectedPenaltyType : nil,
+            faceoffWon: isFaceoff ? faceoffWon : nil,
+            opponentNumber: opponentNumber,
+            period: period
+        )
+        onSave()
+    }
+}
+
+// MARK: - Clock Edit Sheet
+
+private struct ClockEditSheet: View {
+    @Binding var minutes: Int
+    @Binding var seconds: Int
+    let onSet: () -> Void
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            VStack(spacing: 16) {
+                Text("Edit Clock")
+                    .font(.title2.bold())
+
+                HStack(spacing: 0) {
+                    Picker("Minutes", selection: $minutes) {
+                        ForEach(0...25, id: \.self) { m in
+                            Text(String(format: "%02d", m)).tag(m)
+                        }
+                    }
+                    .pickerStyle(.wheel)
+                    .frame(width: 80)
+                    .clipped()
+
+                    Text(":")
+                        .font(.system(size: 32, weight: .bold, design: .monospaced))
+
+                    Picker("Seconds", selection: $seconds) {
+                        ForEach(0...59, id: \.self) { s in
+                            Text(String(format: "%02d", s)).tag(s)
+                        }
+                    }
+                    .pickerStyle(.wheel)
+                    .frame(width: 80)
+                    .clipped()
+                }
+                .frame(height: 150)
+
+                Button {
+                    onSet()
+                } label: {
+                    Text("Set Clock")
+                        .font(.headline)
+                        .foregroundStyle(.white)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 14)
+                        .background(AppTheme.pink, in: RoundedRectangle(cornerRadius: 12))
+                }
+                .padding(.horizontal)
+            }
+            .padding()
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                }
+            }
+        }
     }
 }
