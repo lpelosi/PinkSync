@@ -321,6 +321,14 @@ enum APIClient {
         let opponentNumber: String?
         let isPowerPlay: Bool?
         let isShortHanded: Bool?
+        let onIcePlayerIds: String?
+    }
+
+    struct ShiftPayload: Encodable {
+        let period: Int
+        let duration: Int
+        let startClockTime: String
+        let endClockTime: String
     }
 
     struct PlayerStatPayload: Encodable {
@@ -341,6 +349,9 @@ enum APIClient {
         let gameWinningGoals: Int
         let faceoffWins: Int
         let faceoffLosses: Int
+        let timeOnIce: Int?
+        let plusMinus: Int?
+        let shifts: [ShiftPayload]?
     }
 
     struct GoalieStatPayload: Encodable {
@@ -398,6 +409,12 @@ enum APIClient {
 
         let playerPayloads = game.playerStats.compactMap { stat -> PlayerStatPayload? in
             guard let player = stat.player else { return nil }
+            let shiftPayloads: [ShiftPayload]? = stat.shifts.isEmpty ? nil : stat.shifts
+                .sorted { a, b in
+                    if a.period != b.period { return a.period < b.period }
+                    return a.startClockTime > b.startClockTime
+                }
+                .map { ShiftPayload(period: $0.period, duration: $0.duration, startClockTime: $0.startClockTime, endClockTime: $0.endClockTime) }
             return PlayerStatPayload(
                 playerId: player.playerId,
                 playerName: player.name,
@@ -415,7 +432,10 @@ enum APIClient {
                 shortHandedAssists: stat.shortHandedAssists,
                 gameWinningGoals: stat.gameWinningGoals,
                 faceoffWins: stat.faceoffWins,
-                faceoffLosses: stat.faceoffLosses
+                faceoffLosses: stat.faceoffLosses,
+                timeOnIce: stat.timeOnIce > 0 ? stat.timeOnIce : nil,
+                plusMinus: stat.plusMinus != 0 ? stat.plusMinus : nil,
+                shifts: shiftPayloads
             )
         }
 
@@ -479,7 +499,8 @@ enum APIClient {
                 penaltyType: event.penaltyType.isEmpty ? nil : event.penaltyType,
                 opponentNumber: event.opponentNumber.isEmpty ? nil : event.opponentNumber,
                 isPowerPlay: event.isPowerPlay ? true : nil,
-                isShortHanded: event.isShortHanded ? true : nil
+                isShortHanded: event.isShortHanded ? true : nil,
+                onIcePlayerIds: event.onIcePlayerIds.isEmpty ? nil : event.onIcePlayerIds
             )
         }
 

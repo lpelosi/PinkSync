@@ -16,9 +16,14 @@ final class GamePlayerStats {
     var gameWinningGoals: Int = 0
     var faceoffWins: Int = 0
     var faceoffLosses: Int = 0
+    var timeOnIce: Int = 0
+    var plusMinus: Int = 0
 
     var player: Player?
     var game: Game?
+
+    @Relationship(deleteRule: .cascade, inverse: \PlayerShift.gamePlayerStats)
+    var shifts: [PlayerShift] = []
 
     init(
         shots: Int = 0,
@@ -33,7 +38,9 @@ final class GamePlayerStats {
         shortHandedAssists: Int = 0,
         gameWinningGoals: Int = 0,
         faceoffWins: Int = 0,
-        faceoffLosses: Int = 0
+        faceoffLosses: Int = 0,
+        timeOnIce: Int = 0,
+        plusMinus: Int = 0
     ) {
         self.shots = shots
         self.goals = goals
@@ -48,6 +55,13 @@ final class GamePlayerStats {
         self.gameWinningGoals = gameWinningGoals
         self.faceoffWins = faceoffWins
         self.faceoffLosses = faceoffLosses
+        self.timeOnIce = timeOnIce
+        self.plusMinus = plusMinus
+    }
+
+    var hasRecordedStats: Bool {
+        shots > 0 || goals > 0 || assists > 0 || hits > 0 || blocks > 0 ||
+        penaltyMinutes > 0 || faceoffWins > 0 || faceoffLosses > 0 || timeOnIce > 0
     }
 
     var points: Int { goals + assists }

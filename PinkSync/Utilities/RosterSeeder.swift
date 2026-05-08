@@ -43,7 +43,7 @@ enum RosterSeeder {
         PlayerData(playerId: "4EA968C2-267E-4908-A92A-7FF3BA4B7EA3", name: "Justin 'Stribbs' Stribbel", number: 89, position: "Forward", isGoalie: false),
         PlayerData(playerId: "E9217139-88AB-4631-A15E-3B42970E7923", name: "Brad Love", number: 91, position: "Forward", isGoalie: false),
         PlayerData(playerId: "35086853-4274-4024-AA77-4C22A71C4699", name: "Zach Weisberg", number: 0, position: "Forward", isGoalie: false),
-        PlayerData(playerId: "7A45803E-2C8B-4EF5-AC0E-5B2508594866", name: "Nick Welsh", number: 0, position: "Forward", isGoalie: false),
+        PlayerData(playerId: "7A45803E-2C8B-4EF5-AC0E-5B2508594866", name: "Nick Welsh", number: 96, position: "Forward", isGoalie: false),
     ]
 
     /// Known name corrections: DB spelling → correct spelling.

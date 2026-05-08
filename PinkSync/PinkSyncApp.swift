@@ -35,7 +35,8 @@ struct PinkSyncApp: App {
                                     GameGoalieStats.self,
                                     ShootoutRound.self,
                                     OpponentTeam.self,
-                                    GameEvent.self
+                                    GameEvent.self,
+                                    PlayerShift.self
                                 )
                                 APIClient.authManager = authManager
                                 container = c

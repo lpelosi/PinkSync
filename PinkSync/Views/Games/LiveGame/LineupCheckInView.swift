@@ -101,6 +101,13 @@ struct LineupCheckInView: View {
             }
             .onAppear {
                 selectedGoalieId = game.startingGoalie?.persistentModelID
+                let existingIds = Set(game.playerStats.compactMap { $0.player?.persistentModelID })
+                if !existingIds.isEmpty {
+                    checkedIds = existingIds
+                    if let goalieId = selectedGoalieId {
+                        checkedIds.remove(goalieId)
+                    }
+                }
             }
         }
     }

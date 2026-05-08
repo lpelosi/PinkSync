@@ -9,6 +9,8 @@ struct GameDetailView: View {
     @Query(sort: \Player.number) private var allPlayers: [Player]
     @Query private var savedTeams: [OpponentTeam]
 
+    @Environment(\.dismiss) private var dismiss
+
     @State private var sendError: String?
     @State private var showingSendError = false
     @State private var isSending = false
@@ -18,14 +20,24 @@ struct GameDetailView: View {
     @State private var showingLiveCheckIn = false
     @State private var liveVM: LiveGameViewModel?
     @State private var pendingCheckedIn: [Player]?
+    @State private var showingResetConfirm = false
+    @State private var resetError: String?
+    @State private var showingResetError = false
+    @State private var isResetting = false
+    @State private var showingLineupPicker = false
 
     private var goalies: [Player] {
         allPlayers.filter { $0.isGoalie }
     }
 
-    // All players appear as skaters (including dual-role goalies)
-    private var skaters: [Player] {
-        allPlayers
+    private var lineupSkaters: [Player] {
+        game.playerStats
+            .compactMap { $0.player }
+            .sorted { $0.number < $1.number }
+    }
+
+    private var hasLineup: Bool {
+        !lineupSkaters.isEmpty
     }
 
     var body: some View {
@@ -132,21 +144,41 @@ struct GameDetailView: View {
 
             // MARK: - Skaters
             Section("Skaters") {
-                ForEach(skaters) { player in
-                    let stats = playerStats(for: player)
-                    NavigationLink {
-                        PlayerStatsView(player: player, stats: stats, game: game)
-                    } label: {
-                        HStack {
-                            PlayerRow(player: player)
-                            if stats != nil {
-                                Spacer()
-                                Image(systemName: "checkmark.circle.fill")
-                                    .foregroundStyle(AppTheme.pink)
-                                    .font(.caption)
+                if hasLineup {
+                    ForEach(lineupSkaters) { player in
+                        let stats = playerStats(for: player)
+                        NavigationLink {
+                            PlayerStatsView(player: player, stats: stats, game: game)
+                        } label: {
+                            HStack {
+                                PlayerRow(player: player)
+                                if stats != nil && stats!.hasRecordedStats {
+                                    Spacer()
+                                    Image(systemName: "checkmark.circle.fill")
+                                        .foregroundStyle(AppTheme.pink)
+                                        .font(.caption)
+                                }
                             }
                         }
                     }
+
+                    Button("Edit Lineup") {
+                        showingLineupPicker = true
+                    }
+                    .foregroundStyle(AppTheme.teal)
+                } else {
+                    Button {
+                        showingLineupPicker = true
+                    } label: {
+                        HStack {
+                            Spacer()
+                            Label("Set Lineup", systemImage: "person.3.fill")
+                                .font(.headline)
+                            Spacer()
+                        }
+                        .padding(.vertical, 8)
+                    }
+                    .foregroundStyle(AppTheme.pink)
                 }
             }
 
@@ -214,6 +246,30 @@ struct GameDetailView: View {
                         .foregroundStyle(.green)
                 }
             }
+
+            // MARK: - Reset Game
+            if authManager.canManageGames && !game.scheduleId.isEmpty {
+                Section {
+                    Button(role: .destructive) {
+                        showingResetConfirm = true
+                    } label: {
+                        HStack {
+                            Spacer()
+                            if isResetting {
+                                ProgressView()
+                            } else {
+                                Label("Reset to Bout", systemImage: "arrow.uturn.backward")
+                                    .font(.headline)
+                            }
+                            Spacer()
+                        }
+                        .padding(.vertical, 4)
+                    }
+                    .disabled(isResetting)
+                } footer: {
+                    Text("Clears all stats and returns this game to the schedule as an upcoming bout.")
+                }
+            }
         }
         .navigationTitle("vs \(game.opponent)")
         .alert("Send Failed", isPresented: $showingSendError) {
@@ -221,9 +277,27 @@ struct GameDetailView: View {
         } message: {
             Text(sendError ?? "Unknown error")
         }
+        .alert("Reset Game?", isPresented: $showingResetConfirm) {
+            Button("Cancel", role: .cancel) {}
+            Button("Reset", role: .destructive) {
+                Task { await resetGame() }
+            }
+        } message: {
+            Text("This will clear all stats and events for this game and return it to the schedule as an upcoming bout.")
+        }
+        .alert("Reset Failed", isPresented: $showingResetError) {
+            Button("OK") {}
+        } message: {
+            Text(resetError ?? "Unknown error")
+        }
         .sheet(isPresented: $showingGoaliePicker) {
             NavigationStack {
                 GoaliePickerView(game: game, goalies: goalies)
+            }
+        }
+        .sheet(isPresented: $showingLineupPicker) {
+            NavigationStack {
+                GameLineupPickerView(game: game, allPlayers: allPlayers)
             }
         }
         .sheet(isPresented: $showingSummary) {
@@ -270,6 +344,24 @@ struct GameDetailView: View {
         game.goalieStats.first { $0.player?.persistentModelID == player.persistentModelID }
     }
 
+    private func resetGame() async {
+        isResetting = true
+        if game.isSynced && !game.gameId.isEmpty {
+            do {
+                try await APIClient.deleteGameFromServer(gameId: game.gameId)
+            } catch {
+                resetError = "Failed to remove from server: \(error.localizedDescription)"
+                showingResetError = true
+                isResetting = false
+                return
+            }
+        }
+        modelContext.delete(game)
+        try? modelContext.save()
+        isResetting = false
+        dismiss()
+    }
+
     private func sendStats() async {
         isSending = true
         game.isComplete = true
@@ -305,6 +397,118 @@ struct GameDetailView: View {
             showingSendError = true
         }
         isSending = false
+    }
+}
+
+// MARK: - Goalie Picker
+
+// MARK: - Lineup Picker
+
+struct GameLineupPickerView: View {
+    let game: Game
+    let allPlayers: [Player]
+    @Environment(\.modelContext) private var modelContext
+    @Environment(\.dismiss) private var dismiss
+    @State private var selectedIds: Set<PersistentIdentifier> = []
+
+    private var skaters: [Player] {
+        allPlayers.sorted { $0.number < $1.number }
+    }
+
+    private let columns = [GridItem(.adaptive(minimum: 80), spacing: 12)]
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
+                HStack {
+                    Text("\(selectedIds.count) selected")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    Button(selectedIds.count == skaters.count ? "Deselect All" : "Select All") {
+                        if selectedIds.count == skaters.count {
+                            selectedIds.removeAll()
+                        } else {
+                            selectedIds = Set(skaters.map(\.persistentModelID))
+                        }
+                    }
+                    .font(.subheadline)
+                    .foregroundStyle(AppTheme.teal)
+                }
+                .padding(.horizontal)
+
+                LazyVGrid(columns: columns, spacing: 12) {
+                    ForEach(skaters) { player in
+                        let isSelected = selectedIds.contains(player.persistentModelID)
+                        Button {
+                            if isSelected {
+                                selectedIds.remove(player.persistentModelID)
+                            } else {
+                                selectedIds.insert(player.persistentModelID)
+                            }
+                        } label: {
+                            VStack(spacing: 4) {
+                                Text(player.number > 0 ? "\(player.number)" : "—")
+                                    .font(.system(size: 28, weight: .bold, design: .monospaced))
+                                    .foregroundStyle(isSelected ? .white : .secondary)
+                                Text(lastName(player.name))
+                                    .font(.system(size: 11, weight: .medium))
+                                    .foregroundStyle(isSelected ? .white.opacity(0.8) : .secondary)
+                                    .lineLimit(1)
+                            }
+                            .frame(maxWidth: .infinity)
+                            .frame(height: 80)
+                            .background(isSelected ? AppTheme.pink : Color(.systemGray5), in: RoundedRectangle(cornerRadius: 12))
+                        }
+                    }
+                }
+                .padding(.horizontal)
+            }
+            .padding(.vertical)
+        }
+        .navigationTitle("Set Lineup")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .cancellationAction) {
+                Button("Cancel") { dismiss() }
+            }
+            ToolbarItem(placement: .confirmationAction) {
+                Button("Done") {
+                    applyLineup()
+                    dismiss()
+                }
+                .fontWeight(.bold)
+            }
+        }
+        .onAppear {
+            selectedIds = Set(
+                game.playerStats.compactMap { $0.player?.persistentModelID }
+            )
+        }
+    }
+
+    private func applyLineup() {
+        let currentIds = Set(game.playerStats.compactMap { $0.player?.persistentModelID })
+
+        for player in skaters where selectedIds.contains(player.persistentModelID) && !currentIds.contains(player.persistentModelID) {
+            let stats = GamePlayerStats()
+            stats.player = player
+            stats.game = game
+            modelContext.insert(stats)
+        }
+
+        for stat in game.playerStats {
+            guard let playerId = stat.player?.persistentModelID else { continue }
+            if !selectedIds.contains(playerId) && !stat.hasRecordedStats {
+                modelContext.delete(stat)
+            }
+        }
+
+        try? modelContext.save()
+    }
+
+    private func lastName(_ name: String) -> String {
+        name.components(separatedBy: " ").last ?? name
     }
 }
 

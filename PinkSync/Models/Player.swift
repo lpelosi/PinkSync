@@ -70,6 +70,13 @@ final class Player {
         guard total > 0 else { return 0 }
         return Double(totalFaceoffWins) / Double(total) * 100
     }
+    var totalPlusMinus: Int { gameStats.reduce(0) { $0 + $1.plusMinus } }
+    var totalTimeOnIce: Int { gameStats.reduce(0) { $0 + $1.timeOnIce } }
+    var averageTimeOnIce: Double {
+        let gamesWithTOI = gameStats.filter { $0.timeOnIce > 0 }
+        guard !gamesWithTOI.isEmpty else { return 0 }
+        return Double(gamesWithTOI.reduce(0) { $0 + $1.timeOnIce }) / Double(gamesWithTOI.count)
+    }
 
     // MARK: - Goalie Aggregates
 

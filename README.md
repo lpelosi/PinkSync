@@ -52,9 +52,10 @@ PinkSync/
 ├── Models/                  # SwiftData models
 │   ├── Game.swift           # Game with score, result, sync status, scheduleId
 │   ├── Player.swift         # Player with computed season aggregates
-│   ├── GamePlayerStats.swift # Per-game skater stats (shots, goals, assists, PPG, SHG, PPA, SHA, GWG, etc.)
+│   ├── GamePlayerStats.swift # Per-game skater stats (shots, goals, assists, +/-, PPG, SHG, PPA, SHA, GWG, TOI, etc.)
 │   ├── GameGoalieStats.swift # Per-game goalie stats (SA, GA, result)
 │   ├── GameEvent.swift      # Per-action event model (period, clock time, PP/SH flags)
+│   ├── PlayerShift.swift    # Individual shift records (period, duration, start/end clock times)
 │   ├── ShootoutRound.swift  # Individual shootout round tracking
 │   ├── GameResult.swift     # W/L/OTL/SOW/SOL enum
 │   ├── Position.swift       # Player position enum (C, LW, RW, LD, RD, Goalie)
@@ -84,12 +85,13 @@ PinkSync/
 │   ├── Stats/               # Season stat tables
 │   ├── Auth/                # Login + profile views
 │   ├── Admin/               # User management (role-gated)
-│   └── Components/          # Reusable UI (StatButton, PlayerRow, ClockTimeField)
+│   └── Components/          # Reusable UI (StatButton, PlayerRow, ClockTimeField, CachedPlayerPhoto)
 ├── Theme/
 │   └── AppTheme.swift       # Pink color scheme, fonts, button styles
 ├── Utilities/
 │   ├── APIClient.swift      # HTTP client for backend communication
 │   ├── AuthManager.swift    # JWT auth + role-based access control
+│   ├── PhotoCache.swift     # Two-tier (memory + disk) player photo cache
 │   ├── RosterSeeder.swift   # Seeds roster + opponent teams on first launch
 │   ├── KeychainHelper.swift # Secure token storage
 │   ├── Secrets.swift        # API key + base URL (gitignored)
@@ -103,19 +105,25 @@ PinkSync/
 ### Game Workflow
 1. **Create a game** — pick an opponent (from saved teams or type a new one), set the date, location, and starting goalie. Games can also be created directly from scheduled bouts.
 2. **Go Live** — check in players, then record stats in real-time with the live game mode
-3. **Live stat tracking** — tap players to record shots, goals (with assists), hits, blocks, penalties. All events are timestamped with the game clock and tagged with the current period.
+3. **Live stat tracking** — tap players to record shots, goals (with assists), hits, blocks, penalties. All events are timestamped with the game clock and tagged with the current period. On-ice players appear first for quick selection, with an expandable bench section for all enrolled players.
 4. **Game clock + penalty clock** — configurable period length, running clock with start/stop/edit, automatic penalty countdown timers with support for concurrent penalties (5-on-3)
 5. **Auto PP/SH detection** — goals scored during a power play or shorthanded situation are automatically flagged. Power play goals clear the opposing team's shortest minor penalty (NHL rules).
 6. **Per-period tracking** — "End Period" buttons advance through 1st → 2nd → 3rd → OT → SO. All stats are recorded per-period with optional clock time for goals and penalties.
 7. **Edit plays** — tap any event in the live feed to edit it (change player, assists, time, type). Undo support for all actions.
 8. **Goalie stats** — shots against, goals against, result, shootout rounds
-9. **Review** — game summary with per-period scoring grid, shots by period, goal/penalty detail logs, and full skater/goalie stat tables
-10. **Save & Send** — submits the game to the backend API, which updates the website automatically
-11. **Edit & re-send** — fix errors after sending; the API upserts by gameId
+9. **Line management** — assign players to lines with game positions (C, LW, RW, LD, RD). Supports rolling lines where unassigned players stay on ice during line changes. Faceoffs default to the on-ice center for quick recording, with other players available below.
+10. **Lineup management** — set the game lineup before going live. Only enrolled players appear in the skaters list. Players can be added or removed via the lineup picker; the "Go Live" check-in pre-selects the existing lineup.
+11. **Review** — game summary with per-period scoring grid, shots by period, goal/penalty detail logs, and full skater/goalie stat tables. Only enrolled players are shown (not the full roster). Tap any skater to see a per-shift breakdown with individual shift durations and per-period totals.
+12. **Save & Send** — submits the game to the backend API, which updates the website automatically
+13. **Edit & re-send** — fix errors after sending; the API upserts by gameId
+14. **Reset to Bout** — clears all stats and events for a game and returns it to the schedule as an upcoming bout (admin only, games linked to a schedule entry)
 
 ### Stat Tracking (NHL-aligned)
-- **Skaters**: GP, G, A, P, PPG, PPA, SHG, SHA, GWG, PIM, Shots, Hits, Blocks, FO W/L
+- **Skaters**: GP, G, A, P, +/-, PPG, PPA, SHG, SHA, GWG, PIM, Shots, Hits, Blocks, FO W/L, TOI
 - **Goalies**: GP, W, L, OTL, SOW, SOL, SA, GA, GAA, SV%
+- **+/- (Plus/Minus)** — auto-tracked on even-strength and short-handed goals per NHL rules (not power play goals). Visible only to admins in the app; data stored server-side but not displayed on the website.
+- **TOI (Time On Ice)** — per-shift tracking synced to the game clock. Individual shifts are recorded with start/end clock times and duration. Total TOI and average shift length are computed per game.
+- **Per-shift tracking** — each player's shifts are stored as individual records with period, duration, and clock times. Shift data is sent to the server for future analytics.
 - **GWG** (Game Winning Goal) is auto-computed from event history
 - **PPA/SHA** (Power Play Assists / Short-Handed Assists) are auto-tracked during goal recording
 
@@ -125,11 +133,17 @@ PinkSync/
 - Games are linked to their schedule entry via `scheduleId` — completed games are automatically filtered out of the "Upcoming" section
 - Schedule management is role-gated (schedule_manager or admin)
 
+### Player Photos
+- Photos are synced from the server during roster sync (pull-to-refresh on the Roster tab)
+- The server resolves photos by player number (`/img/players/{number}.png`) with a `default.jpg` fallback
+- Photos uploaded via the app are stored by playerId and take priority over number-based photos
+- A two-tier cache (in-memory + on-disk) stores photos locally so subsequent app launches display instantly without network calls
+
 ### Tabs
 - **Games** — upcoming bouts, active games, create new games, live stat tracking
-- **Roster** — full team roster, add/edit/remove players, position management (C, LW, RW, LD, RD, Goalie)
+- **Roster** — full team roster with player photos, add/edit/remove players, position management (C, LW, RW, LD, RD, Goalie)
 - **History** — completed games with team filter (logos in filter chips), tap for game summary
-- **Stats** — season aggregate tables for skaters and goalies
+- **Stats** — season aggregate tables for skaters and goalies with sortable columns (including jersey number). +/- column is visible only to admins.
 
 ### Opponent Teams
 - 7 teams are pre-seeded with logos (Orlando Kraken, Warriors, Wolves, Dangleberry Puckhounds, Whiskey Tangos, Otterhawks, District 5) plus Frozen Flamingos
@@ -160,7 +174,9 @@ The app communicates with an Express.js API server. The server code lives in the
 | `DELETE`| `/api/game/:gameId` | Delete a game (admin) |
 | `GET` | `/api/games` | All raw game data (authenticated) |
 | `GET` | `/api/stats` | Aggregated season stats (read key) |
-| `GET` | `/api/roster` | Server roster with active status (read key) |
+| `GET` | `/api/roster` | Server roster with active status and photo paths (read key) |
+| `PUT` | `/api/roster` | Replace full roster (roster_manager/admin) |
+| `POST` | `/api/player-photo` | Upload a player photo (photographer/admin) |
 | `POST` | `/api/team-logo` | Upload an opponent team logo (admin) |
 | `GET` | `/api/team-logos` | Map of uploaded team logos (read key) |
 | `GET` | `/api/schedule` | Scheduled bouts (read key) |
@@ -219,7 +235,8 @@ Requires `mod_proxy` and `mod_proxy_http` enabled.
 
 The app seeds 27 Frozen Flamingos players on first launch, including 4 goalies (3 of which are dual-role skater/goalies). The roster can be edited in-app after launch.
 
-## Deleting Games
+## Managing Games
 
 - Games can be deleted via swipe-to-delete with a confirmation dialog
 - Synced games are also deleted from the server when removed from the app (admin role required)
+- Games linked to a scheduled bout can be reset via "Reset to Bout" — this clears all stats, events, and shifts, removes the game from the server if synced, and returns the schedule entry to the upcoming bouts list

@@ -7,12 +7,21 @@ struct LivePlayerPickerView: View {
     let skipLabel: String?
     let excluded: Set<PersistentIdentifier>
     let onPick: (Player?) -> Void
+    var benchPlayers: [Player] = []
 
     @Environment(\.dismiss) private var dismiss
+    @State private var showAll = false
 
     private var availablePlayers: [Player] {
         players
             .filter { !excluded.contains($0.persistentModelID) }
+            .sorted { $0.number < $1.number }
+    }
+
+    private var availableBench: [Player] {
+        benchPlayers
+            .filter { !excluded.contains($0.persistentModelID) }
+            .filter { p in !players.contains(where: { $0.persistentModelID == p.persistentModelID }) }
             .sorted { $0.number < $1.number }
     }
 
@@ -23,26 +32,38 @@ struct LivePlayerPickerView: View {
             ScrollView {
                 LazyVGrid(columns: columns, spacing: 12) {
                     ForEach(availablePlayers) { player in
-                        Button {
-                            onPick(player)
-                            dismiss()
-                        } label: {
-                            VStack(spacing: 4) {
-                                Text(player.number > 0 ? "\(player.number)" : "—")
-                                    .font(.system(size: 28, weight: .bold, design: .monospaced))
-                                    .foregroundStyle(.white)
-                                Text(lastName(player.name))
-                                    .font(.system(size: 11, weight: .medium))
-                                    .foregroundStyle(.white.opacity(0.8))
-                                    .lineLimit(1)
-                            }
-                            .frame(maxWidth: .infinity)
-                            .frame(height: 80)
-                            .background(AppTheme.pink, in: RoundedRectangle(cornerRadius: 12))
-                        }
+                        playerButton(player, color: AppTheme.pink)
                     }
                 }
                 .padding()
+
+                if !availableBench.isEmpty {
+                    if showAll {
+                        Text("ALL PLAYERS")
+                            .font(.system(size: 10, weight: .bold))
+                            .tracking(1)
+                            .foregroundStyle(.secondary)
+                            .padding(.top, 4)
+
+                        LazyVGrid(columns: columns, spacing: 12) {
+                            ForEach(availableBench) { player in
+                                playerButton(player, color: Color(.systemGray3))
+                            }
+                        }
+                        .padding(.horizontal)
+                        .padding(.bottom)
+                    } else {
+                        Button {
+                            showAll = true
+                        } label: {
+                            Text("Show All Players")
+                                .font(.system(size: 13, weight: .bold))
+                                .foregroundStyle(AppTheme.teal)
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 10)
+                        }
+                    }
+                }
 
                 if let skipLabel {
                     Button {
@@ -66,6 +87,26 @@ struct LivePlayerPickerView: View {
                     Button("Cancel") { dismiss() }
                 }
             }
+        }
+    }
+
+    private func playerButton(_ player: Player, color: Color) -> some View {
+        Button {
+            onPick(player)
+            dismiss()
+        } label: {
+            VStack(spacing: 4) {
+                Text(player.number > 0 ? "\(player.number)" : "—")
+                    .font(.system(size: 28, weight: .bold, design: .monospaced))
+                    .foregroundStyle(.white)
+                Text(lastName(player.name))
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(.white.opacity(0.8))
+                    .lineLimit(1)
+            }
+            .frame(maxWidth: .infinity)
+            .frame(height: 80)
+            .background(color, in: RoundedRectangle(cornerRadius: 12))
         }
     }
 

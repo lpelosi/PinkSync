@@ -3,6 +3,7 @@ import SwiftData
 
 struct StatsView: View {
     @Query(sort: \Player.number) private var players: [Player]
+    @Environment(AuthManager.self) private var authManager
 
     @State private var skaterSortKey = "P"
     @State private var goalieSortKey = "W"
@@ -44,12 +45,15 @@ struct StatsView: View {
 
     private var skaterHeader: some View {
         HStack(spacing: 0) {
-            Text("#").frame(width: 30, alignment: .leading)
+            sortableHeader("#", width: 30, key: "#", isSkater: true, alignment: .leading)
             Text("Name").frame(maxWidth: .infinity, alignment: .leading)
             sortableHeader("GP", width: 32, key: "GP", isSkater: true)
             sortableHeader("G", width: 28, key: "G", isSkater: true)
             sortableHeader("A", width: 28, key: "A", isSkater: true)
             sortableHeader("P", width: 28, key: "P", isSkater: true)
+            if authManager.canManageGames {
+                sortableHeader("+/-", width: 32, key: "+/-", isSkater: true)
+            }
             sortableHeader("PPG", width: 32, key: "PPG", isSkater: true)
             sortableHeader("FO%", width: 36, key: "FO%", isSkater: true)
             sortableHeader("SOG", width: 36, key: "SOG", isSkater: true)
@@ -70,6 +74,9 @@ struct StatsView: View {
             Text("\(player.totalGoals)").frame(width: 28)
             Text("\(player.totalAssists)").frame(width: 28)
             Text("\(player.totalPoints)").frame(width: 28)
+            if authManager.canManageGames {
+                Text(player.totalPlusMinus > 0 ? "+\(player.totalPlusMinus)" : "\(player.totalPlusMinus)").frame(width: 32)
+            }
             Text("\(player.totalPowerPlayGoals)").frame(width: 32)
             Text((player.totalFaceoffWins + player.totalFaceoffLosses) > 0 ? String(format: "%.0f", player.faceoffPercentage) : "-").frame(width: 36)
             Text("\(player.totalShots)").frame(width: 36)
@@ -82,7 +89,7 @@ struct StatsView: View {
 
     private var goalieHeader: some View {
         HStack(spacing: 0) {
-            Text("#").frame(width: 30, alignment: .leading)
+            sortableHeader("#", width: 30, key: "#", isSkater: false, alignment: .leading)
             Text("Name").frame(maxWidth: .infinity, alignment: .leading)
             sortableHeader("GP", width: 32, key: "GP", isSkater: false)
             sortableHeader("W", width: 28, key: "W", isSkater: false)
@@ -114,13 +121,13 @@ struct StatsView: View {
 
     // MARK: - Sorting
 
-    private func sortableHeader(_ title: String, width: CGFloat, key: String, isSkater: Bool) -> some View {
+    private func sortableHeader(_ title: String, width: CGFloat, key: String, isSkater: Bool, alignment: Alignment = .center) -> some View {
         Button {
             if isSkater { skaterSortKey = key } else { goalieSortKey = key }
         } label: {
             Text(title)
                 .foregroundStyle((isSkater ? skaterSortKey : goalieSortKey) == key ? AppTheme.pink : .secondary)
-                .frame(width: width)
+                .frame(width: width, alignment: alignment)
         }
         .buttonStyle(.plain)
     }
@@ -128,10 +135,12 @@ struct StatsView: View {
     private func sortSkaters(_ players: [Player]) -> [Player] {
         players.sorted { a, b in
             switch skaterSortKey {
+            case "#": a.number < b.number
             case "GP": a.gamesPlayed > b.gamesPlayed
             case "G": a.totalGoals > b.totalGoals
             case "A": a.totalAssists > b.totalAssists
             case "P": a.totalPoints > b.totalPoints
+            case "+/-": a.totalPlusMinus > b.totalPlusMinus
             case "PPG": a.totalPowerPlayGoals > b.totalPowerPlayGoals
             case "FO%": a.faceoffPercentage > b.faceoffPercentage
             case "SOG": a.totalShots > b.totalShots
@@ -144,6 +153,7 @@ struct StatsView: View {
     private func sortGoalies(_ players: [Player]) -> [Player] {
         players.sorted { a, b in
             switch goalieSortKey {
+            case "#": a.number < b.number
             case "GP": a.goalieGameStats.count > b.goalieGameStats.count
             case "W": a.wins > b.wins
             case "L": a.losses > b.losses

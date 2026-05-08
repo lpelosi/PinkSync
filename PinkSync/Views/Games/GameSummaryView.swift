@@ -4,6 +4,8 @@ import SwiftData
 struct GameSummaryView: View {
     let game: Game
     @Environment(\.dismiss) private var dismiss
+    @Environment(AuthManager.self) private var authManager
+    @State private var selectedPlayerStats: GamePlayerStats?
 
     private var skaterStats: [GamePlayerStats] {
         game.playerStats
@@ -322,6 +324,10 @@ struct GameSummaryView: View {
                     HStack(spacing: 0) {
                         Text("#").frame(width: 30, alignment: .leading)
                         Text("Player").frame(width: 140, alignment: .leading)
+                        Text("TOI").frame(width: 36)
+                        if authManager.canManageGames {
+                            Text("+/-").frame(width: 30)
+                        }
                         Text("SOG").frame(width: 30)
                         Text("G").frame(width: 24)
                         Text("A").frame(width: 24)
@@ -348,6 +354,10 @@ struct GameSummaryView: View {
                                 Text(player.name)
                                     .lineLimit(1)
                                     .frame(width: 140, alignment: .leading)
+                                Text(stat.timeOnIce > 0 ? formatTOI(stat.timeOnIce) : "-").frame(width: 36)
+                                if authManager.canManageGames {
+                                    Text(stat.plusMinus > 0 ? "+\(stat.plusMinus)" : "\(stat.plusMinus)").frame(width: 30)
+                                }
                                 Text("\(stat.shots)").frame(width: 30)
                                 Text("\(stat.goals)").frame(width: 24)
                                 Text("\(stat.assists)").frame(width: 24)
@@ -363,11 +373,16 @@ struct GameSummaryView: View {
                             }
                             .font(.system(size: 11, design: .monospaced))
                             .padding(.vertical, 4)
+                            .contentShape(Rectangle())
+                            .onTapGesture { selectedPlayerStats = stat }
                         }
                     }
                 }
                 .padding(.horizontal)
             }
+        }
+        .sheet(item: $selectedPlayerStats) { stat in
+            PlayerShiftDetailView(stat: stat)
         }
     }
 
@@ -397,6 +412,12 @@ struct GameSummaryView: View {
         case 3: "3rd Period"
         default: "Overtime"
         }
+    }
+
+    private func formatTOI(_ seconds: Int) -> String {
+        let m = seconds / 60
+        let s = seconds % 60
+        return String(format: "%d:%02d", m, s)
     }
 
     private func eventCountsByPeriod(type: String) -> [Int: Int] {
@@ -463,5 +484,111 @@ struct GameSummaryView: View {
         case 3: "3rd"
         default: "OT"
         }
+    }
+}
+
+// MARK: - Player Shift Detail
+
+private struct PlayerShiftDetailView: View {
+    let stat: GamePlayerStats
+    @Environment(\.dismiss) private var dismiss
+
+    private var sortedShifts: [PlayerShift] {
+        stat.shifts.sorted { a, b in
+            if a.period != b.period { return a.period < b.period }
+            return a.startClockTime > b.startClockTime
+        }
+    }
+
+    private var shiftsByPeriod: [(period: Int, shifts: [PlayerShift])] {
+        let grouped = Dictionary(grouping: sortedShifts, by: \.period)
+        return grouped.keys.sorted().map { (period: $0, shifts: grouped[$0]!) }
+    }
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Section {
+                    HStack(spacing: 24) {
+                        VStack(spacing: 2) {
+                            Text(formatTOI(stat.timeOnIce))
+                                .font(.system(size: 28, weight: .bold, design: .monospaced))
+                                .foregroundStyle(AppTheme.pink)
+                            Text("Total TOI")
+                                .font(.system(size: 11, weight: .bold))
+                                .foregroundStyle(.secondary)
+                        }
+                        VStack(spacing: 2) {
+                            Text("\(stat.shifts.count)")
+                                .font(.system(size: 28, weight: .bold, design: .monospaced))
+                                .foregroundStyle(AppTheme.pink)
+                            Text("Shifts")
+                                .font(.system(size: 11, weight: .bold))
+                                .foregroundStyle(.secondary)
+                        }
+                        if !stat.shifts.isEmpty {
+                            VStack(spacing: 2) {
+                                Text(formatTOI(stat.timeOnIce / stat.shifts.count))
+                                    .font(.system(size: 28, weight: .bold, design: .monospaced))
+                                    .foregroundStyle(AppTheme.pink)
+                                Text("Avg Shift")
+                                    .font(.system(size: 11, weight: .bold))
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 8)
+                }
+
+                if stat.shifts.isEmpty {
+                    Section {
+                        Text("No shift data recorded for this game.")
+                            .foregroundStyle(.secondary)
+                    }
+                } else {
+                    ForEach(shiftsByPeriod, id: \.period) { group in
+                        Section(periodName(group.period)) {
+                            ForEach(Array(group.shifts.enumerated()), id: \.offset) { index, shift in
+                                HStack {
+                                    Text("Shift \(index + 1)")
+                                        .font(.system(size: 13, weight: .medium))
+                                    Spacer()
+                                    if !shift.startClockTime.isEmpty || !shift.endClockTime.isEmpty {
+                                        Text("\(shift.startClockTime) → \(shift.endClockTime)")
+                                            .font(.system(size: 12, design: .monospaced))
+                                            .foregroundStyle(.secondary)
+                                    }
+                                    Text(formatTOI(shift.duration))
+                                        .font(.system(size: 14, weight: .bold, design: .monospaced))
+                                        .foregroundStyle(AppTheme.pink)
+                                        .frame(width: 50, alignment: .trailing)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            .navigationTitle(stat.player?.name ?? "Player")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                Button("Done") { dismiss() }
+            }
+        }
+    }
+
+    private func periodName(_ period: Int) -> String {
+        switch period {
+        case 1: "1st Period"
+        case 2: "2nd Period"
+        case 3: "3rd Period"
+        default: "Overtime"
+        }
+    }
+
+    private func formatTOI(_ seconds: Int) -> String {
+        let m = seconds / 60
+        let s = seconds % 60
+        return String(format: "%d:%02d", m, s)
     }
 }

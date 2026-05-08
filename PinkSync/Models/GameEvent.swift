@@ -17,6 +17,7 @@ final class GameEvent {
     var opponentNumber: String
     var isPowerPlay: Bool = false
     var isShortHanded: Bool = false
+    var onIcePlayerIds: String = ""
     var game: Game?
 
     init(

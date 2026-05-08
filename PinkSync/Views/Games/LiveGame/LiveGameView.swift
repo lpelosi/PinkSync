@@ -17,6 +17,8 @@ struct LiveGameView: View {
         case periodSummary
         case editEvent(Int)
         case clockEdit
+        case benchPicker
+        case onIceManager
 
         var id: String {
             switch self {
@@ -34,6 +36,7 @@ struct LiveGameView: View {
     @State private var eventToDelete: Int?
     @State private var editClockMinutes = 0
     @State private var editClockSeconds = 0
+    @State private var playerToSub: Player?
 
     var body: some View {
         ZStack {
@@ -42,6 +45,7 @@ struct LiveGameView: View {
 
                 switch vm.period {
                 case .regulation, .overtime:
+                    onIcePanel
                     lineFilterBar
                     actionButtons
                     quickRepeatBar
@@ -90,21 +94,23 @@ struct LiveGameView: View {
             switch sheet {
             case .playerPicker:
                 LivePlayerPickerView(
-                    players: vm.filteredSkaters,
+                    players: vm.onIceSkatersSorted,
                     title: pickerTitle,
                     skipLabel: nil,
-                    excluded: []
-                ) { player in
-                    guard let player else { return }
-                    switch pendingAction {
-                    case .shot: vm.recordShot(player: player)
-                    case .hit: vm.recordHit(player: player)
-                    case .block: vm.recordBlock(player: player)
-                    default: break
-                    }
-                    pendingAction = nil
-                }
-                .presentationDetents([.medium])
+                    excluded: [],
+                    onPick: { player in
+                        guard let player else { return }
+                        switch pendingAction {
+                        case .shot: vm.recordShot(player: player)
+                        case .hit: vm.recordHit(player: player)
+                        case .block: vm.recordBlock(player: player)
+                        default: break
+                        }
+                        pendingAction = nil
+                    },
+                    benchPlayers: vm.skaters
+                )
+                .presentationDetents([.medium, .large])
             case .goalFlow:
                 GoalFlowSheet(vm: vm) {
                     activeSheet = nil
@@ -113,8 +119,9 @@ struct LiveGameView: View {
             case .penaltyEntry:
                 PenaltyEntryView(
                     isOurs: true,
-                    players: vm.filteredSkaters,
-                    excluded: []
+                    players: vm.onIceSkatersSorted,
+                    excluded: [],
+                    benchPlayers: vm.skaters
                 ) { player, _, type, clockTime in
                     if let player {
                         vm.recordPenalty(player: player, type: type, clockTime: clockTime)
@@ -176,6 +183,15 @@ struct LiveGameView: View {
                     activeSheet = nil
                 }
                 .presentationDetents([.medium])
+            case .benchPicker:
+                BenchPickerSheet(vm: vm, subOutPlayer: playerToSub) {
+                    activeSheet = nil
+                    playerToSub = nil
+                }
+                .presentationDetents([.medium])
+            case .onIceManager:
+                OnIceManagerSheet(vm: vm)
+                    .presentationDetents([.medium, .large])
             }
         }
         .alert("Result?", isPresented: $showingShootoutResult) {
@@ -386,6 +402,82 @@ struct LiveGameView: View {
         }
     }
 
+    // MARK: - On Ice Panel
+
+    @ViewBuilder
+    private var onIcePanel: some View {
+        VStack(spacing: 4) {
+            if vm.onIceSkatersSorted.isEmpty {
+                HStack {
+                    Text("ON ICE")
+                        .font(.system(size: 10, weight: .bold))
+                        .tracking(1)
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    Button {
+                        activeSheet = .onIceManager
+                    } label: {
+                        Text("Set Players")
+                            .font(.system(size: 12, weight: .bold))
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 6)
+                            .background(AppTheme.teal, in: Capsule())
+                    }
+                }
+                .padding(.horizontal)
+            } else {
+                HStack(spacing: 0) {
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 4) {
+                            ForEach(vm.onIceSkatersSorted) { player in
+                                let pos = vm.positionLabel(for: player)
+                                Button {
+                                    playerToSub = player
+                                    activeSheet = .benchPicker
+                                } label: {
+                                    VStack(spacing: 0) {
+                                        if !pos.isEmpty {
+                                            Text(pos)
+                                                .font(.system(size: 8, weight: .heavy))
+                                                .foregroundStyle(.white.opacity(0.7))
+                                        }
+                                        Text("\(player.number)")
+                                            .font(.system(size: 14, weight: .bold, design: .monospaced))
+                                            .foregroundStyle(.white)
+                                        Text(vm.formatTOI(vm.currentShiftSeconds[player.persistentModelID] ?? 0))
+                                            .font(.system(size: 8, weight: .medium, design: .monospaced))
+                                            .foregroundStyle(.white.opacity(0.7))
+                                    }
+                                    .frame(width: 42, height: pos.isEmpty ? 36 : 42)
+                                    .background(
+                                        vm.isForwardPosition(player.position) ? AppTheme.pink : AppTheme.teal,
+                                        in: RoundedRectangle(cornerRadius: 6)
+                                    )
+                                }
+                            }
+                        }
+                        .padding(.leading)
+                    }
+
+                    Button {
+                        activeSheet = .onIceManager
+                    } label: {
+                        Image(systemName: "arrow.left.arrow.right")
+                            .font(.system(size: 12, weight: .bold))
+                            .foregroundStyle(.secondary)
+                            .frame(width: 32, height: 36)
+                            .background(Color(.systemGray5), in: RoundedRectangle(cornerRadius: 6))
+                    }
+                    .padding(.trailing)
+                }
+            }
+
+        }
+        .padding(.vertical, 4)
+        .background(Color(.systemGray6).opacity(0.3))
+    }
+
     // MARK: - Line Filter Bar
 
     @ViewBuilder
@@ -401,6 +493,7 @@ struct LiveGameView: View {
                     ForEach(fwdLines, id: \.self) { line in
                         lineFilterPill(line, color: AppTheme.pink, isActive: vm.activeLineFilter == line) {
                             vm.activeLineFilter = (vm.activeLineFilter == line) ? nil : line
+                            vm.sendLineOn(line)
                         }
                     }
                     if !fwdLines.isEmpty && !defPairings.isEmpty {
@@ -409,6 +502,7 @@ struct LiveGameView: View {
                     ForEach(defPairings, id: \.self) { pair in
                         lineFilterPill(pair, color: AppTheme.teal, isActive: vm.activeLineFilter == pair) {
                             vm.activeLineFilter = (vm.activeLineFilter == pair) ? nil : pair
+                            vm.sendLineOn(pair)
                         }
                     }
                 }
@@ -791,60 +885,85 @@ private struct FaceoffPickerSheet: View {
     @Bindable var vm: LiveGameViewModel
     @Environment(\.dismiss) private var dismiss
 
-    private var players: [Player] { vm.filteredSkaters }
+    private var players: [Player] { vm.onIceSkatersSorted }
     private let columns = [GridItem(.adaptive(minimum: 80), spacing: 12)]
+
+    private var centerPlayer: Player? {
+        players.first { vm.playerGamePosition[$0.persistentModelID] == "C" }
+    }
+
+    private var otherPlayers: [Player] {
+        guard let center = centerPlayer else { return players }
+        return players.filter { $0.persistentModelID != center.persistentModelID }
+    }
 
     var body: some View {
         NavigationStack {
             ScrollView {
-                Text("Won or Lost?")
-                    .font(.caption.bold())
-                    .foregroundStyle(.secondary)
-                    .padding(.top, 8)
+                if let center = centerPlayer {
+                    VStack(spacing: 0) {
+                        VStack(spacing: 4) {
+                            Text(center.number > 0 ? "\(center.number)" : "—")
+                                .font(.system(size: 40, weight: .bold, design: .monospaced))
+                                .foregroundStyle(.white)
+                            Text(lastName(center.name))
+                                .font(.system(size: 14, weight: .medium))
+                                .foregroundStyle(.white.opacity(0.8))
+                                .lineLimit(1)
+                        }
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 90)
+                        .background(AppTheme.pink, in: UnevenRoundedRectangle(topLeadingRadius: 16, topTrailingRadius: 16))
+
+                        HStack(spacing: 0) {
+                            Button {
+                                vm.recordFaceoff(player: center, won: true)
+                                dismiss()
+                            } label: {
+                                Text("WON")
+                                    .font(.system(size: 18, weight: .heavy))
+                                    .foregroundStyle(.white)
+                                    .frame(maxWidth: .infinity)
+                                    .frame(height: 52)
+                                    .background(.green)
+                            }
+
+                            Button {
+                                vm.recordFaceoff(player: center, won: false)
+                                dismiss()
+                            } label: {
+                                Text("LOST")
+                                    .font(.system(size: 18, weight: .heavy))
+                                    .foregroundStyle(.white)
+                                    .frame(maxWidth: .infinity)
+                                    .frame(height: 52)
+                                    .background(.red)
+                            }
+                        }
+                        .clipShape(UnevenRoundedRectangle(bottomLeadingRadius: 16, bottomTrailingRadius: 16))
+                    }
+                    .padding(.horizontal)
+                    .padding(.top, 12)
+
+                    if !otherPlayers.isEmpty {
+                        Text("OTHER PLAYERS")
+                            .font(.system(size: 10, weight: .bold))
+                            .tracking(1)
+                            .foregroundStyle(.secondary)
+                            .padding(.top, 16)
+                    }
+                }
+
+                if centerPlayer == nil {
+                    Text("Won or Lost?")
+                        .font(.caption.bold())
+                        .foregroundStyle(.secondary)
+                        .padding(.top, 8)
+                }
 
                 LazyVGrid(columns: columns, spacing: 12) {
-                    ForEach(players) { player in
-                        VStack(spacing: 0) {
-                            VStack(spacing: 4) {
-                                Text(player.number > 0 ? "\(player.number)" : "—")
-                                    .font(.system(size: 22, weight: .bold, design: .monospaced))
-                                    .foregroundStyle(.white)
-                                Text(lastName(player.name))
-                                    .font(.system(size: 10, weight: .medium))
-                                    .foregroundStyle(.white.opacity(0.8))
-                                    .lineLimit(1)
-                            }
-                            .frame(maxWidth: .infinity)
-                            .frame(height: 55)
-                            .background(AppTheme.pink, in: UnevenRoundedRectangle(topLeadingRadius: 12, topTrailingRadius: 12))
-
-                            HStack(spacing: 0) {
-                                Button {
-                                    vm.recordFaceoff(player: player, won: true)
-                                    dismiss()
-                                } label: {
-                                    Text("W")
-                                        .font(.system(size: 14, weight: .heavy))
-                                        .foregroundStyle(.white)
-                                        .frame(maxWidth: .infinity)
-                                        .frame(height: 32)
-                                        .background(.green)
-                                }
-
-                                Button {
-                                    vm.recordFaceoff(player: player, won: false)
-                                    dismiss()
-                                } label: {
-                                    Text("L")
-                                        .font(.system(size: 14, weight: .heavy))
-                                        .foregroundStyle(.white)
-                                        .frame(maxWidth: .infinity)
-                                        .frame(height: 32)
-                                        .background(.red)
-                                }
-                            }
-                            .clipShape(UnevenRoundedRectangle(bottomLeadingRadius: 12, bottomTrailingRadius: 12))
-                        }
+                    ForEach(centerPlayer == nil ? players : otherPlayers) { player in
+                        faceoffPlayerCard(player)
                     }
                 }
                 .padding()
@@ -856,6 +975,50 @@ private struct FaceoffPickerSheet: View {
                     Button("Cancel") { dismiss() }
                 }
             }
+        }
+    }
+
+    private func faceoffPlayerCard(_ player: Player) -> some View {
+        VStack(spacing: 0) {
+            VStack(spacing: 4) {
+                Text(player.number > 0 ? "\(player.number)" : "—")
+                    .font(.system(size: 22, weight: .bold, design: .monospaced))
+                    .foregroundStyle(.white)
+                Text(lastName(player.name))
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundStyle(.white.opacity(0.8))
+                    .lineLimit(1)
+            }
+            .frame(maxWidth: .infinity)
+            .frame(height: 55)
+            .background(AppTheme.pink, in: UnevenRoundedRectangle(topLeadingRadius: 12, topTrailingRadius: 12))
+
+            HStack(spacing: 0) {
+                Button {
+                    vm.recordFaceoff(player: player, won: true)
+                    dismiss()
+                } label: {
+                    Text("W")
+                        .font(.system(size: 14, weight: .heavy))
+                        .foregroundStyle(.white)
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 32)
+                        .background(.green)
+                }
+
+                Button {
+                    vm.recordFaceoff(player: player, won: false)
+                    dismiss()
+                } label: {
+                    Text("L")
+                        .font(.system(size: 14, weight: .heavy))
+                        .foregroundStyle(.white)
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 32)
+                        .background(.red)
+                }
+            }
+            .clipShape(UnevenRoundedRectangle(bottomLeadingRadius: 12, bottomTrailingRadius: 12))
         }
     }
 
@@ -886,57 +1049,14 @@ private struct LineSetupSheet: View {
         NavigationStack {
             List {
                 Section {
-                    Text("Assign forwards to lines and defensemen to pairings.")
+                    Text("Assign positions, then lines. Players without a line will stay on ice during line changes (rolling).")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
 
                 Section("Forwards") {
                     ForEach(forwards) { player in
-                        HStack {
-                            Text(player.number > 0 ? "#\(player.number)" : "--")
-                                .font(.system(.body, design: .monospaced, weight: .bold))
-                                .frame(width: 40)
-                            Text(player.name)
-                                .lineLimit(1)
-                            Spacer()
-                            Picker("Line", selection: lineBinding(for: player)) {
-                                Text("—").tag("")
-                                Text("F1").tag("F1")
-                                Text("F2").tag("F2")
-                                Text("F3").tag("F3")
-                                Text("F4").tag("F4")
-                            }
-                            .pickerStyle(.segmented)
-                            .frame(width: 200)
-                        }
-                    }
-                }
-
-                Section("Defense") {
-                    ForEach(defensemen) { player in
-                        HStack {
-                            Text(player.number > 0 ? "#\(player.number)" : "--")
-                                .font(.system(.body, design: .monospaced, weight: .bold))
-                                .frame(width: 40)
-                            Text(player.name)
-                                .lineLimit(1)
-                            Spacer()
-                            Picker("Pairing", selection: lineBinding(for: player)) {
-                                Text("—").tag("")
-                                Text("D1").tag("D1")
-                                Text("D2").tag("D2")
-                                Text("D3").tag("D3")
-                            }
-                            .pickerStyle(.segmented)
-                            .frame(width: 160)
-                        }
-                    }
-                }
-
-                if !unassigned.isEmpty {
-                    Section("Other") {
-                        ForEach(unassigned) { player in
+                        VStack(spacing: 6) {
                             HStack {
                                 Text(player.number > 0 ? "#\(player.number)" : "--")
                                     .font(.system(.body, design: .monospaced, weight: .bold))
@@ -944,18 +1064,103 @@ private struct LineSetupSheet: View {
                                 Text(player.name)
                                     .lineLimit(1)
                                 Spacer()
+                            }
+                            HStack(spacing: 8) {
+                                Picker("Pos", selection: positionBinding(for: player)) {
+                                    Text("—").tag("")
+                                    Text("C").tag("C")
+                                    Text("LW").tag("LW")
+                                    Text("RW").tag("RW")
+                                }
+                                .pickerStyle(.segmented)
+                                .frame(width: 150)
+
                                 Picker("Line", selection: lineBinding(for: player)) {
                                     Text("—").tag("")
                                     Text("F1").tag("F1")
                                     Text("F2").tag("F2")
                                     Text("F3").tag("F3")
                                     Text("F4").tag("F4")
+                                }
+                                .pickerStyle(.segmented)
+                                .frame(width: 200)
+                            }
+                        }
+                        .padding(.vertical, 2)
+                    }
+                }
+
+                Section("Defense") {
+                    ForEach(defensemen) { player in
+                        VStack(spacing: 6) {
+                            HStack {
+                                Text(player.number > 0 ? "#\(player.number)" : "--")
+                                    .font(.system(.body, design: .monospaced, weight: .bold))
+                                    .frame(width: 40)
+                                Text(player.name)
+                                    .lineLimit(1)
+                                Spacer()
+                            }
+                            HStack(spacing: 8) {
+                                Picker("Pos", selection: positionBinding(for: player)) {
+                                    Text("—").tag("")
+                                    Text("LD").tag("LD")
+                                    Text("RD").tag("RD")
+                                }
+                                .pickerStyle(.segmented)
+                                .frame(width: 120)
+
+                                Picker("Pairing", selection: lineBinding(for: player)) {
+                                    Text("—").tag("")
                                     Text("D1").tag("D1")
                                     Text("D2").tag("D2")
                                     Text("D3").tag("D3")
                                 }
-                                .pickerStyle(.menu)
+                                .pickerStyle(.segmented)
+                                .frame(width: 160)
                             }
+                        }
+                        .padding(.vertical, 2)
+                    }
+                }
+
+                if !unassigned.isEmpty {
+                    Section("Other") {
+                        ForEach(unassigned) { player in
+                            VStack(spacing: 6) {
+                                HStack {
+                                    Text(player.number > 0 ? "#\(player.number)" : "--")
+                                        .font(.system(.body, design: .monospaced, weight: .bold))
+                                        .frame(width: 40)
+                                    Text(player.name)
+                                        .lineLimit(1)
+                                    Spacer()
+                                }
+                                HStack(spacing: 8) {
+                                    Picker("Pos", selection: positionBinding(for: player)) {
+                                        Text("—").tag("")
+                                        Text("C").tag("C")
+                                        Text("LW").tag("LW")
+                                        Text("RW").tag("RW")
+                                        Text("LD").tag("LD")
+                                        Text("RD").tag("RD")
+                                    }
+                                    .pickerStyle(.menu)
+
+                                    Picker("Line", selection: lineBinding(for: player)) {
+                                        Text("—").tag("")
+                                        Text("F1").tag("F1")
+                                        Text("F2").tag("F2")
+                                        Text("F3").tag("F3")
+                                        Text("F4").tag("F4")
+                                        Text("D1").tag("D1")
+                                        Text("D2").tag("D2")
+                                        Text("D3").tag("D3")
+                                    }
+                                    .pickerStyle(.menu)
+                                }
+                            }
+                            .padding(.vertical, 2)
                         }
                     }
                 }
@@ -979,6 +1184,19 @@ private struct LineSetupSheet: View {
                     vm.playerLines.removeValue(forKey: player.persistentModelID)
                 } else {
                     vm.playerLines[player.persistentModelID] = newValue
+                }
+            }
+        )
+    }
+
+    private func positionBinding(for player: Player) -> Binding<String> {
+        Binding(
+            get: { vm.playerGamePosition[player.persistentModelID] ?? "" },
+            set: { newValue in
+                if newValue.isEmpty {
+                    vm.playerGamePosition.removeValue(forKey: player.persistentModelID)
+                } else {
+                    vm.playerGamePosition[player.persistentModelID] = newValue
                 }
             }
         )
@@ -1058,8 +1276,19 @@ private struct GoalFlowSheet: View {
     @Bindable var vm: LiveGameViewModel
     let onDone: () -> Void
 
-    private var availablePlayers: [Player] {
-        vm.filteredSkaters.filter { !vm.goalFlowExcludedPlayers.contains($0.persistentModelID) }
+    @State private var showAll = false
+
+    private var excluded: Set<PersistentIdentifier> { vm.goalFlowExcludedPlayers }
+
+    private var onIcePlayers: [Player] {
+        vm.onIceSkatersSorted.filter { !excluded.contains($0.persistentModelID) }
+    }
+
+    private var benchPlayers: [Player] {
+        vm.skaters
+            .filter { !excluded.contains($0.persistentModelID) }
+            .filter { p in !vm.onIcePlayers.contains(p.persistentModelID) }
+            .sorted { $0.number < $1.number }
     }
 
     private let columns = [GridItem(.adaptive(minimum: 80), spacing: 12)]
@@ -1101,26 +1330,58 @@ private struct GoalFlowSheet: View {
             }
 
             LazyVGrid(columns: columns, spacing: 12) {
-                ForEach(availablePlayers) { player in
-                    Button {
-                        pickPlayer(player)
-                    } label: {
-                        VStack(spacing: 4) {
-                            Text(player.number > 0 ? "\(player.number)" : "—")
-                                .font(.system(size: 28, weight: .bold, design: .monospaced))
-                                .foregroundStyle(.white)
-                            Text(lastName(player.name))
-                                .font(.system(size: 11, weight: .medium))
-                                .foregroundStyle(.white.opacity(0.8))
-                                .lineLimit(1)
-                        }
-                        .frame(maxWidth: .infinity)
-                        .frame(height: 80)
-                        .background(AppTheme.pink, in: RoundedRectangle(cornerRadius: 12))
-                    }
+                ForEach(onIcePlayers) { player in
+                    goalPlayerButton(player, color: AppTheme.pink)
                 }
             }
             .padding()
+
+            if !benchPlayers.isEmpty {
+                if showAll {
+                    Text("ALL PLAYERS")
+                        .font(.system(size: 10, weight: .bold))
+                        .tracking(1)
+                        .foregroundStyle(.secondary)
+                        .padding(.top, 4)
+
+                    LazyVGrid(columns: columns, spacing: 12) {
+                        ForEach(benchPlayers) { player in
+                            goalPlayerButton(player, color: Color(.systemGray3))
+                        }
+                    }
+                    .padding(.horizontal)
+                    .padding(.bottom)
+                } else {
+                    Button {
+                        showAll = true
+                    } label: {
+                        Text("Show All Players")
+                            .font(.system(size: 13, weight: .bold))
+                            .foregroundStyle(AppTheme.teal)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 10)
+                    }
+                }
+            }
+        }
+    }
+
+    private func goalPlayerButton(_ player: Player, color: Color) -> some View {
+        Button {
+            pickPlayer(player)
+        } label: {
+            VStack(spacing: 4) {
+                Text(player.number > 0 ? "\(player.number)" : "—")
+                    .font(.system(size: 28, weight: .bold, design: .monospaced))
+                    .foregroundStyle(.white)
+                Text(lastName(player.name))
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(.white.opacity(0.8))
+                    .lineLimit(1)
+            }
+            .frame(maxWidth: .infinity)
+            .frame(height: 80)
+            .background(color, in: RoundedRectangle(cornerRadius: 12))
         }
     }
 
@@ -1512,6 +1773,148 @@ private struct EventEditSheet: View {
             period: period
         )
         onSave()
+    }
+}
+
+// MARK: - Bench Picker Sheet
+
+private struct BenchPickerSheet: View {
+    @Bindable var vm: LiveGameViewModel
+    let subOutPlayer: Player?
+    let onDone: () -> Void
+    @Environment(\.dismiss) private var dismiss
+
+    private let columns = [GridItem(.adaptive(minimum: 72), spacing: 10)]
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                if let player = subOutPlayer {
+                    Text("Replacing #\(player.number) \(lastName(player.name))")
+                        .font(.headline)
+                        .padding(.top, 12)
+                }
+
+                LazyVGrid(columns: columns, spacing: 10) {
+                    ForEach(vm.benchPlayers) { player in
+                        Button {
+                            if let outPlayer = subOutPlayer {
+                                vm.swapPlayer(on: player, off: outPlayer)
+                            }
+                            onDone()
+                        } label: {
+                            VStack(spacing: 2) {
+                                Text(player.number > 0 ? "\(player.number)" : "—")
+                                    .font(.system(size: 24, weight: .bold, design: .monospaced))
+                                    .foregroundStyle(.white)
+                                Text(lastName(player.name))
+                                    .font(.system(size: 10, weight: .medium))
+                                    .foregroundStyle(.white.opacity(0.8))
+                                    .lineLimit(1)
+                            }
+                            .frame(maxWidth: .infinity)
+                            .frame(height: 60)
+                            .background(
+                                vm.isForwardPosition(player.position) ? AppTheme.pink : AppTheme.teal,
+                                in: RoundedRectangle(cornerRadius: 10)
+                            )
+                        }
+                    }
+                }
+                .padding()
+
+                Button {
+                    if let outPlayer = subOutPlayer {
+                        vm.takePlayerOffIce(outPlayer)
+                    }
+                    onDone()
+                } label: {
+                    Label("Take Off Ice", systemImage: "arrow.down.circle.fill")
+                        .font(.system(size: 14, weight: .bold))
+                        .foregroundStyle(.white)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 12)
+                        .background(Color(.systemGray3), in: RoundedRectangle(cornerRadius: 10))
+                }
+                .padding(.horizontal)
+            }
+            .navigationTitle("Sub Player")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                }
+            }
+        }
+    }
+
+    private func lastName(_ name: String) -> String {
+        name.components(separatedBy: " ").last ?? name
+    }
+}
+
+// MARK: - On Ice Manager Sheet
+
+private struct OnIceManagerSheet: View {
+    @Bindable var vm: LiveGameViewModel
+    @Environment(\.dismiss) private var dismiss
+
+    private let columns = [GridItem(.adaptive(minimum: 72), spacing: 10)]
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                Text("Tap players to toggle on/off ice")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .padding(.top, 8)
+
+                LazyVGrid(columns: columns, spacing: 10) {
+                    ForEach(vm.skaters) { player in
+                        Button {
+                            vm.togglePlayerOnIce(player)
+                        } label: {
+                            let isOnIce = vm.onIcePlayers.contains(player.persistentModelID)
+                            VStack(spacing: 2) {
+                                Text(player.number > 0 ? "\(player.number)" : "—")
+                                    .font(.system(size: 24, weight: .bold, design: .monospaced))
+                                    .foregroundStyle(.white)
+                                Text(lastName(player.name))
+                                    .font(.system(size: 10, weight: .medium))
+                                    .foregroundStyle(.white.opacity(0.8))
+                                    .lineLimit(1)
+                            }
+                            .frame(maxWidth: .infinity)
+                            .frame(height: 60)
+                            .background(
+                                isOnIce
+                                    ? (vm.isForwardPosition(player.position) ? AppTheme.pink : AppTheme.teal)
+                                    : Color(.systemGray4),
+                                in: RoundedRectangle(cornerRadius: 10)
+                            )
+                            .overlay(
+                                isOnIce
+                                    ? RoundedRectangle(cornerRadius: 10).stroke(.white, lineWidth: 2)
+                                    : nil
+                            )
+                        }
+                    }
+                }
+                .padding()
+            }
+            .navigationTitle("Manage On Ice")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") { dismiss() }
+                        .fontWeight(.bold)
+                }
+            }
+        }
+    }
+
+    private func lastName(_ name: String) -> String {
+        name.components(separatedBy: " ").last ?? name
     }
 }
 

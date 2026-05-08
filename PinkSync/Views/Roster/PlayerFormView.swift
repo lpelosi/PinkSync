@@ -64,23 +64,8 @@ struct PlayerFormView: View {
                                 .scaledToFill()
                                 .frame(width: 100, height: 100)
                                 .clipShape(Circle())
-                        } else if let existingPhotoURL {
-                            AsyncImage(url: existingPhotoURL) { image in
-                                image
-                                    .resizable()
-                                    .scaledToFill()
-                            } placeholder: {
-                                Image(systemName: "person.circle.fill")
-                                    .resizable()
-                                    .foregroundStyle(.secondary)
-                            }
-                            .frame(width: 100, height: 100)
-                            .clipShape(Circle())
                         } else {
-                            Image(systemName: "person.circle.fill")
-                                .resizable()
-                                .foregroundStyle(.secondary)
-                                .frame(width: 100, height: 100)
+                            CachedPlayerPhoto(url: existingPhotoURL, size: 100)
                         }
                     }
                     Spacer()

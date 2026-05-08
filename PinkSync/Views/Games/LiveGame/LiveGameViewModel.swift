@@ -125,6 +125,15 @@ final class LiveGameViewModel: Identifiable {
     // Active penalties
     var activePenalties: [ActivePenalty] = []
 
+    // On-ice tracking
+    var onIcePlayers: Set<PersistentIdentifier> = []
+    var playerTOI: [PersistentIdentifier: Int] = [:]
+    var currentShiftSeconds: [PersistentIdentifier: Int] = [:]
+    var shiftStartClockTime: [PersistentIdentifier: String] = [:]
+
+    // Game position assignment (C, LW, RW, LD, RD)
+    var playerGamePosition: [PersistentIdentifier: String] = [:]
+
     private let haptic = UIImpactFeedbackGenerator(style: .medium)
 
     init(game: Game, modelContext: ModelContext) {
@@ -156,12 +165,139 @@ final class LiveGameViewModel: Identifiable {
         Array(Set(playerLines.values.filter { $0.hasPrefix("D") })).sorted()
     }
 
+    var hasLinesConfigured: Bool {
+        !configuredForwardLines.isEmpty || !configuredDefensePairings.isEmpty
+    }
+
+    // MARK: - On Ice
+
+    private static let positionOrder = ["LW": 0, "C": 1, "RW": 2, "LD": 3, "RD": 4]
+
+    var onIceSkatersSorted: [Player] {
+        let goalieId = activeGoalie?.persistentModelID
+        return checkedInPlayers
+            .filter { onIcePlayers.contains($0.persistentModelID) && $0.persistentModelID != goalieId }
+            .sorted { a, b in
+                let posA = Self.positionOrder[playerGamePosition[a.persistentModelID] ?? ""] ?? 5
+                let posB = Self.positionOrder[playerGamePosition[b.persistentModelID] ?? ""] ?? 5
+                if posA != posB { return posA < posB }
+                return a.number < b.number
+            }
+    }
+
+    func positionLabel(for player: Player) -> String {
+        playerGamePosition[player.persistentModelID] ?? ""
+    }
+
+    var benchPlayers: [Player] {
+        let goalieId = activeGoalie?.persistentModelID
+        return checkedInPlayers
+            .filter { !onIcePlayers.contains($0.persistentModelID) && $0.persistentModelID != goalieId }
+            .sorted { $0.number < $1.number }
+    }
+
+    func putPlayerOnIce(_ player: Player) {
+        onIcePlayers.insert(player.persistentModelID)
+        currentShiftSeconds[player.persistentModelID] = 0
+        shiftStartClockTime[player.persistentModelID] = currentClockTime
+    }
+
+    func takePlayerOffIce(_ player: Player) {
+        closeShift(for: player)
+        onIcePlayers.remove(player.persistentModelID)
+        currentShiftSeconds.removeValue(forKey: player.persistentModelID)
+        shiftStartClockTime.removeValue(forKey: player.persistentModelID)
+    }
+
+    func swapPlayer(on incoming: Player, off outgoing: Player) {
+        takePlayerOffIce(outgoing)
+        putPlayerOnIce(incoming)
+    }
+
+    func togglePlayerOnIce(_ player: Player) {
+        if onIcePlayers.contains(player.persistentModelID) {
+            takePlayerOffIce(player)
+        } else {
+            putPlayerOnIce(player)
+        }
+    }
+
+    func sendLineOn(_ lineTag: String) {
+        let isForwardLine = lineTag.hasPrefix("F")
+        let linePlayers = checkedInPlayers.filter { playerLines[$0.persistentModelID] == lineTag }
+        let goalieId = activeGoalie?.persistentModelID
+
+        for player in checkedInPlayers where onIcePlayers.contains(player.persistentModelID) && player.persistentModelID != goalieId {
+            // Skip players without a line assignment (rolling players stay on ice)
+            guard playerLines[player.persistentModelID] != nil else { continue }
+            let playerIsForward = isForwardPosition(player.position)
+            if (isForwardLine && playerIsForward) || (!isForwardLine && !playerIsForward) {
+                takePlayerOffIce(player)
+            }
+        }
+
+        for player in linePlayers {
+            putPlayerOnIce(player)
+        }
+        fire()
+    }
+
+    func isForwardPosition(_ position: String) -> Bool {
+        ["Forward", "Center", "Left Wing", "Right Wing"].contains(position)
+    }
+
+    func onIcePlayerIdString() -> String {
+        onIcePlayers.compactMap { id in
+            checkedInPlayers.first(where: { $0.persistentModelID == id })?.playerId
+        }.joined(separator: ",")
+    }
+
+    func formatTOI(_ seconds: Int) -> String {
+        let m = seconds / 60
+        let s = seconds % 60
+        return String(format: "%d:%02d", m, s)
+    }
+
+    func closeShift(for player: Player) {
+        let id = player.persistentModelID
+        let duration = currentShiftSeconds[id] ?? 0
+        guard duration > 0 else { return }
+        let startTime = shiftStartClockTime[id] ?? ""
+        let endTime = currentClockTime
+        let shift = PlayerShift(period: currentPeriod, duration: duration, startClockTime: startTime, endClockTime: endTime)
+        let stats = findOrCreatePlayerStats(for: player)
+        shift.gamePlayerStats = stats
+        modelContext.insert(shift)
+    }
+
+    func closeAllShifts() {
+        let goalieId = activeGoalie?.persistentModelID
+        for id in onIcePlayers {
+            guard id != goalieId else { continue }
+            if let player = checkedInPlayers.first(where: { $0.persistentModelID == id }) {
+                closeShift(for: player)
+                currentShiftSeconds[id] = 0
+                shiftStartClockTime[id] = currentClockTime
+            }
+        }
+    }
+
+    func persistTOI() {
+        for (playerId, seconds) in playerTOI {
+            if let player = checkedInPlayers.first(where: { $0.persistentModelID == playerId }) {
+                let stats = findOrCreatePlayerStats(for: player)
+                stats.timeOnIce = seconds
+            }
+        }
+    }
+
     func initializeStatsForCheckedInPlayers() {
         for player in skaters {
             _ = findOrCreatePlayerStats(for: player)
         }
         if let goalie = activeGoalie {
             _ = findOrCreateGoalieStats(for: goalie)
+            onIcePlayers.insert(goalie.persistentModelID)
         }
         save()
     }
@@ -231,6 +367,10 @@ final class LiveGameViewModel: Identifiable {
                     }
                 }
                 activePenalties.removeAll { $0.remainingSeconds <= 0 }
+                for playerId in onIcePlayers {
+                    playerTOI[playerId, default: 0] += 1
+                    currentShiftSeconds[playerId, default: 0] += 1
+                }
                 if clockSeconds == 0 {
                     clockRunning = false
                 }
@@ -328,7 +468,8 @@ final class LiveGameViewModel: Identifiable {
         penaltyType: String = "",
         opponentNumber: String = "",
         isPowerPlay: Bool = false,
-        isShortHanded: Bool = false
+        isShortHanded: Bool = false,
+        onIcePlayerIds: String = ""
     ) -> GameEvent {
         let resolvedClockTime = clockTime.isEmpty ? currentClockTime : clockTime
         let event = GameEvent(
@@ -347,6 +488,7 @@ final class LiveGameViewModel: Identifiable {
             isPowerPlay: isPowerPlay,
             isShortHanded: isShortHanded
         )
+        event.onIcePlayerIds = onIcePlayerIds
         event.game = game
         modelContext.insert(event)
         return event
@@ -357,6 +499,7 @@ final class LiveGameViewModel: Identifiable {
     func endPeriod() {
         let skippedSeconds = clockSeconds
         stopClock()
+        closeAllShifts()
         // Sync penalty timers: subtract remaining clock time
         for i in activePenalties.indices {
             activePenalties[i].remainingSeconds -= skippedSeconds
@@ -373,6 +516,7 @@ final class LiveGameViewModel: Identifiable {
 
     func goToOvertime() {
         stopClock()
+        closeAllShifts()
         period = .overtime
         currentPeriod = 4
         if isClockSetUp {
@@ -385,6 +529,7 @@ final class LiveGameViewModel: Identifiable {
 
     func goToShootout() {
         stopClock()
+        closeAllShifts()
         period = .shootout
         ourShootoutGoals = 0
         theirShootoutGoals = 0
@@ -464,6 +609,9 @@ final class LiveGameViewModel: Identifiable {
             goalieStats.result = result.rawValue
         }
 
+        closeAllShifts()
+        persistTOI()
+
         // GWG: the Nth goal where N = opponent final goals + 1 (reg/OT only)
         if period != .shootout && game.goalsFor > game.goalsAgainst {
             let gwgNumber = game.goalsAgainst + 1
@@ -524,12 +672,25 @@ final class LiveGameViewModel: Identifiable {
             assistText += ")"
         }
 
+        // +/- applies on even-strength and short-handed goals, not power play
+        var plusMinusPlayers: [Player] = []
+        if !isPowerPlay {
+            let goalieId = activeGoalie?.persistentModelID
+            plusMinusPlayers = checkedInPlayers.filter {
+                onIcePlayers.contains($0.persistentModelID) && $0.persistentModelID != goalieId
+            }
+            for p in plusMinusPlayers {
+                findOrCreatePlayerStats(for: p).plusMinus += 1
+            }
+        }
+
         let label = playerLabel(scorer)
         let timeStr = clockTime.isEmpty ? "" : " \(clockTime)"
         let strengthStr = isPowerPlay ? " PP" : isShortHanded ? " SH" : ""
-        let event = createEvent(type: "goal", player: scorer, clockTime: clockTime, assist1: primaryAssist, assist2: secondaryAssist, isPowerPlay: isPowerPlay, isShortHanded: isShortHanded)
+        let event = createEvent(type: "goal", player: scorer, clockTime: clockTime, assist1: primaryAssist, assist2: secondaryAssist, isPowerPlay: isPowerPlay, isShortHanded: isShortHanded, onIcePlayerIds: onIcePlayerIdString())
         let wasPP = isPowerPlay
         let wasSH = isShortHanded
+        let pmSnapshot = plusMinusPlayers
         events.append(LiveEvent(emoji: "🚨", description: "\(periodLabel)\(timeStr) \(label) — GOAL\(strengthStr)\(assistText)", undoClosure: {
             scorerStats.goals -= 1
             if wasPP { scorerStats.powerPlayGoals -= 1 }
@@ -546,6 +707,9 @@ final class LiveGameViewModel: Identifiable {
                 a2s.assists -= 1
                 if wasPP { a2s.powerPlayAssists -= 1 }
                 if wasSH { a2s.shortHandedAssists -= 1 }
+            }
+            for p in pmSnapshot {
+                self.findOrCreatePlayerStats(for: p).plusMinus -= 1
             }
             self.removeGameEvent(event)
         }, gameEvent: event))
@@ -642,14 +806,31 @@ final class LiveGameViewModel: Identifiable {
         stats.shotsAgainst += 1
         stats.goalsAgainst += 1
         game.goalsAgainst += 1
+
+        // +/- applies on even-strength and short-handed goals, not power play
+        var plusMinusPlayers: [Player] = []
+        if !isPowerPlay {
+            let goalieId = activeGoalie?.persistentModelID
+            plusMinusPlayers = checkedInPlayers.filter {
+                onIcePlayers.contains($0.persistentModelID) && $0.persistentModelID != goalieId
+            }
+            for p in plusMinusPlayers {
+                findOrCreatePlayerStats(for: p).plusMinus -= 1
+            }
+        }
+
         let label = playerLabel(goalie)
         let timeStr = clockTime.isEmpty ? "" : " \(clockTime)"
         let ppStr = isPowerPlay ? " PP" : ""
-        let event = createEvent(type: "goalAgainst", clockTime: clockTime, isPowerPlay: isPowerPlay)
+        let event = createEvent(type: "goalAgainst", clockTime: clockTime, isPowerPlay: isPowerPlay, onIcePlayerIds: onIcePlayerIdString())
+        let pmSnapshot = plusMinusPlayers
         events.append(LiveEvent(emoji: "🚨", description: "\(periodLabel)\(timeStr) GOAL AGAINST\(ppStr) (\(label))", undoClosure: {
             stats.shotsAgainst -= 1
             stats.goalsAgainst -= 1
             self.game.goalsAgainst -= 1
+            for p in pmSnapshot {
+                self.findOrCreatePlayerStats(for: p).plusMinus += 1
+            }
             self.removeGameEvent(event)
         }, gameEvent: event))
         // PPG against us clears our shortest minor penalty
