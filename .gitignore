@@ -16,3 +16,7 @@ xcuserdata/
 
 # Secrets — NEVER commit
 PinkSync/Utilities/Secrets.swift
+.idea/modules.xml
+.idea/php.xml
+.idea/PinkSync.iml
+.idea/vcs.xml

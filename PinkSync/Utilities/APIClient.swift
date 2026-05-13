@@ -169,6 +169,25 @@ enum APIClient {
         }
     }
 
+    enum APIError: LocalizedError {
+        case server(String)
+
+        var errorDescription: String? {
+            switch self {
+            case .server(let message): return message
+            }
+        }
+    }
+
+    struct ErrorResponse: Decodable {
+        let success: Bool?
+        let message: String
+    }
+
+    private static func decodeServerMessage(from data: Data, fallback: String) -> String {
+        (try? JSONDecoder().decode(ErrorResponse.self, from: data).message) ?? fallback
+    }
+
     // MARK: - User Management API
 
     struct UserResponse: Decodable, Identifiable, Hashable {
@@ -178,6 +197,7 @@ enum APIClient {
         let role: UserRole
         let isActive: Bool
         let createdAt: String?
+        let playerId: String?
 
         var id: String { userId }
     }
@@ -206,28 +226,44 @@ enum APIClient {
         return result.users
     }
 
-    static func createUser(email: String, displayName: String, password: String, role: UserRole) async throws -> UserResponse {
+    static func createUser(
+        email: String,
+        displayName: String,
+        password: String,
+        role: UserRole,
+        playerId: String? = nil
+    ) async throws -> UserResponse {
         guard let url = URL(string: "\(baseURL)/api/users") else {
             throw URLError(.badURL)
         }
         var request = try await authorizedRequest(url: url, method: "POST")
-        let payload: [String: String] = [
+        var payload: [String: Any] = [
             "email": email,
             "displayName": displayName,
             "password": password,
             "role": role.rawValue
         ]
+        if let playerId { payload["playerId"] = playerId }
         request.httpBody = try JSONSerialization.data(withJSONObject: payload)
         let (data, response) = try await URLSession.shared.data(for: request)
-        guard let http = response as? HTTPURLResponse,
-              (200...299).contains(http.statusCode) else {
+        guard let http = response as? HTTPURLResponse else {
             throw URLError(.badServerResponse)
+        }
+        guard (200...299).contains(http.statusCode) else {
+            throw APIError.server(decodeServerMessage(from: data, fallback: "Failed to create user"))
         }
         let result = try JSONDecoder().decode(CreateUserResponse.self, from: data)
         return result.user
     }
 
-    static func updateUser(userId: String, displayName: String? = nil, role: UserRole? = nil, isActive: Bool? = nil, password: String? = nil) async throws {
+    static func updateUser(
+        userId: String,
+        displayName: String? = nil,
+        role: UserRole? = nil,
+        isActive: Bool? = nil,
+        password: String? = nil,
+        playerId: String? = nil
+    ) async throws {
         guard let url = URL(string: "\(baseURL)/api/users/\(userId)") else {
             throw URLError(.badURL)
         }
@@ -237,11 +273,14 @@ enum APIClient {
         if let role { payload["role"] = role.rawValue }
         if let isActive { payload["isActive"] = isActive }
         if let password { payload["password"] = password }
+        if let playerId { payload["playerId"] = playerId }
         request.httpBody = try JSONSerialization.data(withJSONObject: payload)
-        let (_, response) = try await URLSession.shared.data(for: request)
-        guard let http = response as? HTTPURLResponse,
-              (200...299).contains(http.statusCode) else {
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse else {
             throw URLError(.badServerResponse)
+        }
+        guard (200...299).contains(http.statusCode) else {
+            throw APIError.server(decodeServerMessage(from: data, fallback: "Failed to update user"))
         }
     }
 
@@ -300,6 +339,7 @@ enum APIClient {
         let goalsFor: Int
         let goalsAgainst: Int
         let result: String
+        let isComplete: Bool
         let startingGoalie: StartingGoaliePayload?
         let playerStats: [PlayerStatPayload]
         let goalieStats: [GoalieStatPayload]
@@ -513,6 +553,7 @@ enum APIClient {
             goalsFor: game.goalsFor,
             goalsAgainst: game.goalsAgainst,
             result: game.result,
+            isComplete: game.isComplete,
             startingGoalie: startingGoaliePayload,
             playerStats: playerPayloads,
             goalieStats: goaliePayloads,
@@ -581,6 +622,68 @@ enum APIClient {
               (200...299).contains(httpResponse.statusCode) else {
             throw URLError(.badServerResponse)
         }
+    }
+
+    struct MvpVoteSummaryResponse: Decodable {
+        let success: Bool
+        let summary: MvpVoteSummary?
+    }
+
+    struct MvpVoteSummary: Decodable {
+        let gameId: String
+        let status: String
+        let openedAt: String?
+        let closesAt: String?
+        let closedAt: String?
+        let blockedReason: String?
+        let totalEligibleCount: Int
+        let totalBallotCount: Int
+        let votedCount: Int
+        let stars: [MvpRankedPlayer]
+        let algorithmicMvp: MvpRankedPlayer?
+        let finalMvp: MvpFinalMvp?
+    }
+
+    struct MvpRankedPlayer: Decodable, Identifiable, Hashable {
+        let playerId: String
+        let playerName: String
+        let playerNumber: Int
+        let position: String
+        let isGoalie: Bool
+        let summary: String
+        let rank: Int?
+        let starRank: Int?
+
+        var id: String { playerId }
+    }
+
+    struct MvpFinalMvp: Decodable, Hashable {
+        let playerId: String
+        let playerName: String
+        let playerNumber: Int
+        let position: String
+        let isGoalie: Bool
+        let summary: String
+        let votes: Int
+        let tieBrokenByAlgorithmicRank: Bool
+    }
+
+    static func fetchMvpVoteSummary(gameId: String) async throws -> MvpVoteSummary? {
+        let encodedGameId = gameId.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? gameId
+        guard let url = URL(string: "\(baseURL)/api/games/\(encodedGameId)/mvp-vote") else {
+            throw URLError(.badURL)
+        }
+
+        let request = try await authorizedRequest(url: url)
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse else {
+            throw URLError(.badServerResponse)
+        }
+        guard (200...299).contains(http.statusCode) else {
+            throw APIError.server(decodeServerMessage(from: data, fallback: "Failed to load MVP voting summary"))
+        }
+
+        return try JSONDecoder().decode(MvpVoteSummaryResponse.self, from: data).summary
     }
 
     // MARK: - Roster Sync

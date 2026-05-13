@@ -6,6 +6,9 @@ struct GameSummaryView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(AuthManager.self) private var authManager
     @State private var selectedPlayerStats: GamePlayerStats?
+    @State private var mvpVoteSummary: APIClient.MvpVoteSummary?
+    @State private var isLoadingMvpVoteSummary = false
+    @State private var mvpVoteSummaryError: String?
 
     private var skaterStats: [GamePlayerStats] {
         game.playerStats
@@ -24,6 +27,10 @@ struct GameSummaryView: View {
     private var periods: [Int] {
         let eventPeriods = Set(game.events.map(\.period))
         return eventPeriods.sorted()
+    }
+
+    private var shouldShowMvpVoting: Bool {
+        authManager.canManageGames && game.isSynced && !game.gameId.isEmpty
     }
 
     var body: some View {
@@ -46,6 +53,10 @@ struct GameSummaryView: View {
                     skaterStatsSection
                 }
 
+                if shouldShowMvpVoting {
+                    mvpVotingSection
+                }
+
                 if skaterStats.isEmpty && goalieStatsList.isEmpty {
                     ContentUnavailableView(
                         "No Stats Recorded",
@@ -59,6 +70,9 @@ struct GameSummaryView: View {
         .navigationTitle("Game Summary")
         .toolbar {
             Button("Done") { dismiss() }
+        }
+        .task(id: "\(game.gameId)-\(game.isSynced)") {
+            await loadMvpVoteSummary()
         }
     }
 
@@ -386,6 +400,141 @@ struct GameSummaryView: View {
         }
     }
 
+    private var mvpVotingSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            sectionHeader("MVP VOTING")
+
+            if isLoadingMvpVoteSummary {
+                HStack {
+                    ProgressView()
+                    Text("Loading voting summary...")
+                        .foregroundStyle(.secondary)
+                }
+                .padding()
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(Color(.systemGray6))
+                .clipShape(RoundedRectangle(cornerRadius: 12))
+            } else if let mvpVoteSummaryError {
+                Label(mvpVoteSummaryError, systemImage: "exclamationmark.triangle")
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+                    .padding()
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(Color(.systemGray6))
+                    .clipShape(RoundedRectangle(cornerRadius: 12))
+            } else if let summary = mvpVoteSummary {
+                VStack(alignment: .leading, spacing: 16) {
+                    HStack(alignment: .top) {
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text(mvpVotingStatusLabel(summary.status))
+                                .font(.caption.bold())
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 6)
+                                .background(mvpVotingStatusColor(summary.status).opacity(0.18))
+                                .foregroundStyle(mvpVotingStatusColor(summary.status))
+                                .clipShape(Capsule())
+
+                            if let timeline = mvpVotingTimelineText(summary) {
+                                Text(timeline)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+
+                        Spacer()
+
+                        VStack(alignment: .trailing, spacing: 6) {
+                            if let finalMvp = summary.finalMvp {
+                                Text("Voted MVP")
+                                    .font(.caption2.bold())
+                                    .foregroundStyle(.secondary)
+                                Text(finalMvp.playerName)
+                                    .font(.headline)
+                                    .multilineTextAlignment(.trailing)
+                                Text("\(finalMvp.votes) vote\(finalMvp.votes == 1 ? "" : "s")")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            } else if !summary.stars.isEmpty {
+                                Text("Three Stars of the Game")
+                                    .font(.caption2.bold())
+                                    .foregroundStyle(.secondary)
+                                Text(summary.stars.prefix(3).map(\.playerName).joined(separator: ", "))
+                                    .font(.headline)
+                                    .multilineTextAlignment(.trailing)
+                                if let leadStar = summary.stars.first {
+                                    Text("First star: \(leadStar.playerName)")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+                            } else if let algorithmicMvp = summary.algorithmicMvp {
+                                Text("Three Stars of the Game")
+                                    .font(.caption2.bold())
+                                    .foregroundStyle(.secondary)
+                                Text(algorithmicMvp.playerName)
+                                    .font(.headline)
+                                    .multilineTextAlignment(.trailing)
+                                Text("First star")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+
+                    HStack(spacing: 24) {
+                        miniMetric("Eligible", "\(summary.totalEligibleCount)")
+                        miniMetric("Ballots", "\(summary.totalBallotCount)")
+                        miniMetric("Votes", "\(summary.votedCount)")
+                    }
+
+                    if let blockedReason = mvpVotingBlockedReason(summary.blockedReason) {
+                        Text(blockedReason)
+                            .font(.caption)
+                            .foregroundStyle(.orange)
+                    }
+
+                    if !summary.stars.isEmpty {
+                        VStack(alignment: .leading, spacing: 10) {
+                            Text("THREE STARS OF THE GAME")
+                                .font(.system(size: 11, weight: .bold))
+                                .tracking(1)
+                                .foregroundStyle(.secondary)
+
+                            ForEach(summary.stars.prefix(3)) { star in
+                                VStack(alignment: .leading, spacing: 4) {
+                                    HStack {
+                                        Text("\(star.starRank ?? star.rank ?? 0). \(star.playerName)")
+                                            .font(.subheadline.bold())
+                                    }
+                                    Text(star.summary)
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+                                .padding()
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .background(Color(.systemBackground))
+                                .clipShape(RoundedRectangle(cornerRadius: 10))
+                            }
+                        }
+                    }
+
+                }
+                .padding()
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(AppTheme.pink.opacity(0.08))
+                .clipShape(RoundedRectangle(cornerRadius: 12))
+            } else {
+                Text("Voting hasn't opened for this synced game yet.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .padding()
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(Color(.systemGray6))
+                    .clipShape(RoundedRectangle(cornerRadius: 12))
+            }
+        }
+        .padding(.horizontal)
+    }
+
     // MARK: - Helpers
 
     private func sectionHeader(_ title: String) -> some View {
@@ -397,6 +546,16 @@ struct GameSummaryView: View {
 
     private func miniStat(_ label: String, value: String) -> some View {
         VStack(spacing: 2) {
+            Text(value)
+                .font(.system(.body, design: .monospaced, weight: .bold))
+            Text(label)
+                .font(.system(size: 10, weight: .bold))
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    private func miniMetric(_ label: String, _ value: String) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
             Text(value)
                 .font(.system(.body, design: .monospaced, weight: .bold))
             Text(label)
@@ -484,6 +643,72 @@ struct GameSummaryView: View {
         case 3: "3rd"
         default: "OT"
         }
+    }
+
+    private func mvpVotingStatusColor(_ status: String) -> Color {
+        switch status {
+        case "open": return AppTheme.teal
+        case "submitted", "closed": return AppTheme.pink
+        case "blocked": return .orange
+        default: return .secondary
+        }
+    }
+
+    private func mvpVotingStatusLabel(_ status: String) -> String {
+        switch status {
+        case "open": return "Open"
+        case "submitted": return "Submitted"
+        case "closed": return "Closed"
+        case "blocked": return "Blocked"
+        default: return status.capitalized
+        }
+    }
+
+    private func formatVoteTimestamp(_ raw: String?) -> String? {
+        guard let raw else { return nil }
+        let formatter = ISO8601DateFormatter()
+        guard let date = formatter.date(from: raw) else { return raw }
+        return date.formatted(date: .abbreviated, time: .shortened)
+    }
+
+    private func mvpVotingTimelineText(_ summary: APIClient.MvpVoteSummary) -> String? {
+        if summary.status == "open", let closesAt = formatVoteTimestamp(summary.closesAt) {
+            return "Voting closes \(closesAt)"
+        }
+        if summary.status == "closed", let closedAt = formatVoteTimestamp(summary.closedAt ?? summary.closesAt) {
+            return "Voting closed \(closedAt)"
+        }
+        if let openedAt = formatVoteTimestamp(summary.openedAt) {
+            return "Opened \(openedAt)"
+        }
+        return nil
+    }
+
+    private func mvpVotingBlockedReason(_ reason: String?) -> String? {
+        switch reason {
+        case "no_candidates":
+            return "Voting could not open because this game did not have any eligible players."
+        default:
+            return nil
+        }
+    }
+
+    private func loadMvpVoteSummary() async {
+        guard shouldShowMvpVoting else {
+            mvpVoteSummary = nil
+            mvpVoteSummaryError = nil
+            return
+        }
+
+        isLoadingMvpVoteSummary = true
+        mvpVoteSummaryError = nil
+        do {
+            mvpVoteSummary = try await APIClient.fetchMvpVoteSummary(gameId: game.gameId)
+        } catch {
+            mvpVoteSummary = nil
+            mvpVoteSummaryError = "Couldn't load the MVP voting summary."
+        }
+        isLoadingMvpVoteSummary = false
     }
 }
 

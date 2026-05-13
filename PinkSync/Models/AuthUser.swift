@@ -5,6 +5,7 @@ struct AuthUser: Codable, Sendable {
     let email: String
     let displayName: String
     let role: UserRole
+    let playerId: String?
 }
 
 enum UserRole: String, Codable, CaseIterable, Sendable {
