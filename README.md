@@ -114,7 +114,7 @@ PinkSync/
 9. **Line management** — assign players to lines with game positions (C, LW, RW, LD, RD). Supports rolling lines where unassigned players stay on ice during line changes. Faceoffs default to the on-ice center for quick recording, with other players available below.
 10. **Lineup management** — set the game lineup before going live. Only enrolled players appear in the skaters list. Players can be added or removed via the lineup picker; the "Go Live" check-in pre-selects the existing lineup.
 11. **Review** — game summary with per-period scoring grid, shots by period, goal/penalty detail logs, and full skater/goalie stat tables. Only enrolled players are shown (not the full roster). Tap any skater to see a per-shift breakdown with individual shift durations and per-period totals.
-12. **Save & Send** — submits the game to the backend API, which updates the website automatically. Completed synced games can also open the website's player MVP vote flow for the players who dressed in that game.
+12. **Save & Send** — submits the game to the backend API, which updates the website automatically
 13. **Edit & re-send** — fix errors after sending; the API upserts by gameId
 14. **Reset to Bout** — clears all stats and events for a game and returns it to the schedule as an upcoming bout (admin only, games linked to a schedule entry)
 
@@ -126,11 +126,6 @@ PinkSync/
 - **Per-shift tracking** — each player's shifts are stored as individual records with period, duration, and clock times. Shift data is sent to the server for future analytics.
 - **GWG** (Game Winning Goal) is auto-computed from event history
 - **PPA/SHA** (Power Play Assists / Short-Handed Assists) are auto-tracked during goal recording
-
-### Player MVP Voting
-- Completed synced games can open the website's public player MVP vote flow for the players who dressed in that game.
-- Admins can review MVP voting from both Game Detail and Game Summary after a synced game, including vote status, ballot totals, 3 Stars, and the final player-voted MVP once voting closes.
-- The website handles the public vote page, countdown, manual close action, and final result reveal.
 
 ### Schedule Integration
 - Bouts are scheduled on the website and synced to the app
@@ -165,7 +160,7 @@ PinkSync/
 All data is stored locally using SwiftData. The app works fully offline — syncing to the website is triggered manually via "Save & Send."
 
 ### Server-side Backups
-The backend automatically backs up `games.json`, `schedule.json`, `roster.json`, and `mvp-votes.json` to `data/backups/` before every write, keeping the 20 most recent copies per file.
+The backend automatically backs up `games.json`, `schedule.json`, and `roster.json` to `data/backups/` before every write, keeping the 20 most recent copies per file.
 
 ## Backend Setup
 
@@ -175,14 +170,9 @@ The app communicates with an Express.js API server. The server code lives in the
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| `POST` | `/api/game-stats` | Submit or update game stats (admin). Completed syncs can also auto-open player MVP voting. |
+| `POST` | `/api/game-stats` | Submit or update game stats (admin) |
 | `DELETE`| `/api/game/:gameId` | Delete a game (admin) |
 | `GET` | `/api/games` | All raw game data (authenticated) |
-| `GET` | `/api/games/:gameId/mvp-vote` | Admin MVP voting summary for a synced game (used by the app's MVP sections) |
-| `GET` | `/api/games/:gameId/mvp-vote-status` | Public MVP countdown/final-result summary for the website game modal |
-| `POST` | `/api/games/:gameId/mvp-vote-close` | Manually close an active MVP vote (admin/write key) |
-| `GET` | `/api/mvp-vote-hub` | Public MVP vote hub payload for the website vote page |
-| `POST` | `/api/mvp-vote-hub/:gameId/vote` | Submit one public browser vote for the active MVP ballot |
 | `GET` | `/api/stats` | Aggregated season stats (read key) |
 | `GET` | `/api/roster` | Server roster with active status and photo paths (read key) |
 | `PUT` | `/api/roster` | Replace full roster (roster_manager/admin) |
@@ -198,11 +188,11 @@ The app communicates with an Express.js API server. The server code lives in the
 The server requires the following environment variables:
 
 ```bash
-PINKSYNC_API_KEY=<write-key>             # Used by the iOS app for stat sync requests
-PINKSYNC_READ_KEY=<read-key>             # Used by the website frontend for public GET requests
-JWT_SECRET=<jwt-secret>                  # Used for JWT authentication
-JWT_REFRESH_SECRET=<jwt-refresh-secret>  # Used for JWT refresh tokens
-APPLE_SERVICES_ID=<service-id>           # Apple Services ID for Sign in with Apple token verification
+PINKSYNC_API_KEY=<write-key>      # Used by the iOS app for POST requests
+PINKSYNC_READ_KEY=<read-key>      # Used by the website frontend for GET requests
+JWT_SECRET=<jwt-secret>           # Used for JWT authentication
+APPLE_TEAM_ID=<team-id>           # Apple Developer Team ID for Sign in with Apple
+APPLE_SERVICE_ID=<service-id>     # Apple Service ID for web auth
 ```
 
 Generate keys with:

@@ -1,8 +1,8 @@
 import SwiftUI
 
 struct UserManagementView: View {
+    @Environment(AuthManager.self) private var authManager
     @State private var users: [APIClient.UserResponse] = []
-    @State private var rosterPlayers: [APIClient.RosterPlayerResponse] = []
     @State private var isLoading = true
     @State private var errorMessage: String?
     @State private var showingAddUser = false
@@ -33,8 +33,8 @@ struct UserManagementView: View {
                 Section("Active Users") {
                     ForEach(activeUsers) { user in
                         NavigationLink {
-                            UserFormView(mode: .edit(user), rosterPlayers: rosterPlayers) {
-                                await loadData()
+                            UserFormView(mode: .edit(user)) {
+                                await loadUsers()
                             }
                         } label: {
                             userRow(user)
@@ -48,8 +48,8 @@ struct UserManagementView: View {
                 Section("Inactive Users") {
                     ForEach(inactiveUsers) { user in
                         NavigationLink {
-                            UserFormView(mode: .edit(user), rosterPlayers: rosterPlayers) {
-                                await loadData()
+                            UserFormView(mode: .edit(user)) {
+                                await loadUsers()
                             }
                         } label: {
                             userRow(user)
@@ -80,23 +80,23 @@ struct UserManagementView: View {
         }
         .sheet(isPresented: $showingAddUser) {
             NavigationStack {
-                UserFormView(mode: .add, rosterPlayers: rosterPlayers) {
-                    await loadData()
+                UserFormView(mode: .add) {
+                    await loadUsers()
                 }
             }
         }
         .sheet(isPresented: $showingMerge) {
             NavigationStack {
                 MergeAccountsView(users: users.filter(\.isActive)) {
-                    await loadData()
+                    await loadUsers()
                 }
             }
         }
         .task {
-            await loadData()
+            await loadUsers()
         }
         .refreshable {
-            await loadData()
+            await loadUsers()
         }
     }
 
@@ -108,11 +108,6 @@ struct UserManagementView: View {
                 Text(user.email)
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                if let detail = linkedPlayerDetail(for: user) {
-                    Text(detail)
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                }
             }
             Spacer()
             Text(user.role.displayName)
@@ -125,11 +120,6 @@ struct UserManagementView: View {
         }
     }
 
-    private func linkedPlayerDetail(for user: APIClient.UserResponse) -> String? {
-        let linkedPlayerName = rosterPlayers.first(where: { $0.playerId == user.playerId })?.name
-        return linkedPlayerName ?? user.playerId
-    }
-
     private func roleColor(_ role: UserRole) -> Color {
         switch role {
         case .admin: return AppTheme.pink
@@ -140,15 +130,11 @@ struct UserManagementView: View {
         }
     }
 
-    private func loadData() async {
+    private func loadUsers() async {
         isLoading = true
         errorMessage = nil
         do {
             users = try await APIClient.fetchUsers()
-            rosterPlayers = (try? await APIClient.fetchRoster()) ?? []
-            if rosterPlayers.isEmpty {
-                errorMessage = "Users loaded, but roster links are unavailable right now."
-            }
         } catch {
             errorMessage = "Failed to load users: \(error.localizedDescription)"
         }

@@ -7,14 +7,12 @@ struct UserFormView: View {
     }
 
     let mode: Mode
-    let rosterPlayers: [APIClient.RosterPlayerResponse]
     let onSave: () async -> Void
 
     @Environment(\.dismiss) private var dismiss
     @State private var email = ""
     @State private var displayName = ""
     @State private var password = ""
-    @State private var linkedPlayerId = ""
     @State private var selectedRole: UserRole = .player
     @State private var isActive = true
     @State private var isSaving = false
@@ -28,13 +26,6 @@ struct UserFormView: View {
     private var existingUser: APIClient.UserResponse? {
         if case .edit(let user) = mode { return user }
         return nil
-    }
-
-    private var sortedRosterPlayers: [APIClient.RosterPlayerResponse] {
-        rosterPlayers.sorted {
-            if $0.number != $1.number { return $0.number < $1.number }
-            return $0.name < $1.name
-        }
     }
 
     var body: some View {
@@ -75,20 +66,6 @@ struct UserFormView: View {
                 Text("Permissions")
             }
 
-            Section {
-                Picker("Linked Player", selection: $linkedPlayerId) {
-                    Text("None").tag("")
-                    ForEach(sortedRosterPlayers, id: \.playerId) { player in
-                        let numberPrefix = player.number > 0 ? "#\(player.number) - " : ""
-                        Text("\(numberPrefix)\(player.name)").tag(player.playerId)
-                    }
-                }
-            } header: {
-                Text("Player Link")
-            } footer: {
-                Text("Link this login to a roster player so game history, stats, and MVP voting stay tied to the right person.")
-            }
-
             if isEditing {
                 Section {
                     Toggle("Active", isOn: $isActive)
@@ -127,7 +104,6 @@ struct UserFormView: View {
                 displayName = user.displayName
                 selectedRole = user.role
                 isActive = user.isActive
-                linkedPlayerId = user.playerId ?? ""
             }
         }
     }
@@ -144,16 +120,14 @@ struct UserFormView: View {
                         displayName: displayName,
                         role: selectedRole,
                         isActive: isActive,
-                        password: password.isEmpty ? nil : password,
-                        playerId: linkedPlayerId
+                        password: password.isEmpty ? nil : password
                     )
                 } else {
                     _ = try await APIClient.createUser(
                         email: email,
                         displayName: displayName,
                         password: password,
-                        role: selectedRole,
-                        playerId: linkedPlayerId
+                        role: selectedRole
                     )
                 }
                 await onSave()
