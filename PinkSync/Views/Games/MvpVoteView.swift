@@ -295,7 +295,7 @@ struct MvpVoteView: View {
     private func pollLoop() async {
         await refresh()
         while !Task.isCancelled {
-            let delay: Duration = isOpen ? .seconds(5) : .seconds(30)
+            let delay: Duration = isOpen ? .seconds(2) : .seconds(30)
             try? await Task.sleep(for: delay)
             if Task.isCancelled { break }
             await refresh(silent: true)
