@@ -118,7 +118,7 @@ struct LineupCheckInView: View {
             Text(player.number > 0 ? "\(player.number)" : "—")
                 .font(.system(size: 28, weight: .bold, design: .monospaced))
                 .foregroundStyle(checked ? .white : .secondary)
-            Text(lastName(player.name))
+            Text(player.lastName)
                 .font(.system(size: 11, weight: .medium))
                 .foregroundStyle(checked ? .white.opacity(0.8) : .secondary)
                 .lineLimit(1)
@@ -133,9 +133,5 @@ struct LineupCheckInView: View {
             RoundedRectangle(cornerRadius: 12)
                 .strokeBorder(locked ? AppTheme.teal : .clear, lineWidth: 2)
         )
-    }
-
-    private func lastName(_ name: String) -> String {
-        name.components(separatedBy: " ").last ?? name
     }
 }

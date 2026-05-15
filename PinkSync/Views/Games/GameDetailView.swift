@@ -25,6 +25,7 @@ struct GameDetailView: View {
     @State private var showingResetError = false
     @State private var isResetting = false
     @State private var showingLineupPicker = false
+    @State private var showingMvpVote = false
 
     private var goalies: [Player] {
         allPlayers.filter { $0.isGoalie }
@@ -37,7 +38,7 @@ struct GameDetailView: View {
     }
 
     private var hasLineup: Bool {
-        !lineupSkaters.isEmpty
+        !game.playerStats.isEmpty
     }
 
     var body: some View {
@@ -152,7 +153,7 @@ struct GameDetailView: View {
                         } label: {
                             HStack {
                                 PlayerRow(player: player)
-                                if stats != nil && stats!.hasRecordedStats {
+                                if stats?.hasRecordedStats == true {
                                     Spacer()
                                     Image(systemName: "checkmark.circle.fill")
                                         .foregroundStyle(AppTheme.pink)
@@ -247,6 +248,24 @@ struct GameDetailView: View {
                 }
             }
 
+            // MARK: - MVP Voting
+            if authManager.canManageGames && game.isSynced && !game.gameId.isEmpty {
+                Section {
+                    Button {
+                        showingMvpVote = true
+                    } label: {
+                        HStack {
+                            Spacer()
+                            Label("MVP Voting", systemImage: "trophy.fill")
+                                .font(.headline)
+                            Spacer()
+                        }
+                        .padding(.vertical, 4)
+                    }
+                    .foregroundStyle(AppTheme.teal)
+                }
+            }
+
             // MARK: - Reset Game
             if authManager.canManageGames && !game.scheduleId.isEmpty {
                 Section {
@@ -298,6 +317,11 @@ struct GameDetailView: View {
         .sheet(isPresented: $showingLineupPicker) {
             NavigationStack {
                 GameLineupPickerView(game: game, allPlayers: allPlayers)
+            }
+        }
+        .sheet(isPresented: $showingMvpVote) {
+            NavigationStack {
+                MvpVoteView(game: game)
             }
         }
         .sheet(isPresented: $showingSummary) {
@@ -400,8 +424,6 @@ struct GameDetailView: View {
     }
 }
 
-// MARK: - Goalie Picker
-
 // MARK: - Lineup Picker
 
 struct GameLineupPickerView: View {
@@ -451,7 +473,7 @@ struct GameLineupPickerView: View {
                                 Text(player.number > 0 ? "\(player.number)" : "—")
                                     .font(.system(size: 28, weight: .bold, design: .monospaced))
                                     .foregroundStyle(isSelected ? .white : .secondary)
-                                Text(lastName(player.name))
+                                Text(player.lastName)
                                     .font(.system(size: 11, weight: .medium))
                                     .foregroundStyle(isSelected ? .white.opacity(0.8) : .secondary)
                                     .lineLimit(1)
@@ -505,10 +527,6 @@ struct GameLineupPickerView: View {
         }
 
         try? modelContext.save()
-    }
-
-    private func lastName(_ name: String) -> String {
-        name.components(separatedBy: " ").last ?? name
     }
 }
 

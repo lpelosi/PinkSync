@@ -99,7 +99,7 @@ struct LivePlayerPickerView: View {
                 Text(player.number > 0 ? "\(player.number)" : "—")
                     .font(.system(size: 28, weight: .bold, design: .monospaced))
                     .foregroundStyle(.white)
-                Text(lastName(player.name))
+                Text(player.lastName)
                     .font(.system(size: 11, weight: .medium))
                     .foregroundStyle(.white.opacity(0.8))
                     .lineLimit(1)
@@ -108,10 +108,5 @@ struct LivePlayerPickerView: View {
             .frame(height: 80)
             .background(color, in: RoundedRectangle(cornerRadius: 12))
         }
-    }
-
-    private func lastName(_ name: String) -> String {
-        let parts = name.components(separatedBy: " ")
-        return parts.last ?? name
     }
 }

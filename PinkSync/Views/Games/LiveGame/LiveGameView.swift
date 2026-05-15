@@ -906,7 +906,7 @@ private struct FaceoffPickerSheet: View {
                             Text(center.number > 0 ? "\(center.number)" : "—")
                                 .font(.system(size: 40, weight: .bold, design: .monospaced))
                                 .foregroundStyle(.white)
-                            Text(lastName(center.name))
+                            Text(center.lastName)
                                 .font(.system(size: 14, weight: .medium))
                                 .foregroundStyle(.white.opacity(0.8))
                                 .lineLimit(1)
@@ -984,7 +984,7 @@ private struct FaceoffPickerSheet: View {
                 Text(player.number > 0 ? "\(player.number)" : "—")
                     .font(.system(size: 22, weight: .bold, design: .monospaced))
                     .foregroundStyle(.white)
-                Text(lastName(player.name))
+                Text(player.lastName)
                     .font(.system(size: 10, weight: .medium))
                     .foregroundStyle(.white.opacity(0.8))
                     .lineLimit(1)
@@ -1022,9 +1022,6 @@ private struct FaceoffPickerSheet: View {
         }
     }
 
-    private func lastName(_ name: String) -> String {
-        name.components(separatedBy: " ").last ?? name
-    }
 }
 
 // MARK: - Line Setup Sheet
@@ -1374,7 +1371,7 @@ private struct GoalFlowSheet: View {
                 Text(player.number > 0 ? "\(player.number)" : "—")
                     .font(.system(size: 28, weight: .bold, design: .monospaced))
                     .foregroundStyle(.white)
-                Text(lastName(player.name))
+                Text(player.lastName)
                     .font(.system(size: 11, weight: .medium))
                     .foregroundStyle(.white.opacity(0.8))
                     .lineLimit(1)
@@ -1456,9 +1453,6 @@ private struct GoalFlowSheet: View {
         .padding(.bottom, 4)
     }
 
-    private func lastName(_ name: String) -> String {
-        name.components(separatedBy: " ").last ?? name
-    }
 }
 
 // MARK: - Event Edit Sheet
@@ -1790,7 +1784,7 @@ private struct BenchPickerSheet: View {
         NavigationStack {
             ScrollView {
                 if let player = subOutPlayer {
-                    Text("Replacing #\(player.number) \(lastName(player.name))")
+                    Text("Replacing #\(player.number) \(player.lastName)")
                         .font(.headline)
                         .padding(.top, 12)
                 }
@@ -1807,7 +1801,7 @@ private struct BenchPickerSheet: View {
                                 Text(player.number > 0 ? "\(player.number)" : "—")
                                     .font(.system(size: 24, weight: .bold, design: .monospaced))
                                     .foregroundStyle(.white)
-                                Text(lastName(player.name))
+                                Text(player.lastName)
                                     .font(.system(size: 10, weight: .medium))
                                     .foregroundStyle(.white.opacity(0.8))
                                     .lineLimit(1)
@@ -1848,9 +1842,6 @@ private struct BenchPickerSheet: View {
         }
     }
 
-    private func lastName(_ name: String) -> String {
-        name.components(separatedBy: " ").last ?? name
-    }
 }
 
 // MARK: - On Ice Manager Sheet
@@ -1879,7 +1870,7 @@ private struct OnIceManagerSheet: View {
                                 Text(player.number > 0 ? "\(player.number)" : "—")
                                     .font(.system(size: 24, weight: .bold, design: .monospaced))
                                     .foregroundStyle(.white)
-                                Text(lastName(player.name))
+                                Text(player.lastName)
                                     .font(.system(size: 10, weight: .medium))
                                     .foregroundStyle(.white.opacity(0.8))
                                     .lineLimit(1)
@@ -1913,9 +1904,6 @@ private struct OnIceManagerSheet: View {
         }
     }
 
-    private func lastName(_ name: String) -> String {
-        name.components(separatedBy: " ").last ?? name
-    }
 }
 
 // MARK: - Clock Edit Sheet

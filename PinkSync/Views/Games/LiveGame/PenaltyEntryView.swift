@@ -107,7 +107,7 @@ struct PenaltyEntryView: View {
                 Text(player.number > 0 ? "\(player.number)" : "—")
                     .font(.system(size: 28, weight: .bold, design: .monospaced))
                     .foregroundStyle(.white)
-                Text(lastName(player.name))
+                Text(player.lastName)
                     .font(.system(size: 11, weight: .medium))
                     .foregroundStyle(.white.opacity(0.8))
                     .lineLimit(1)
@@ -174,9 +174,5 @@ struct PenaltyEntryView: View {
                 }
             }
         }
-    }
-
-    private func lastName(_ name: String) -> String {
-        name.components(separatedBy: " ").last ?? name
     }
 }

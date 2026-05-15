@@ -48,6 +48,10 @@ final class Player {
         number > 0 ? "#\(number)" : "--"
     }
 
+    var lastName: String {
+        name.components(separatedBy: " ").last ?? name
+    }
+
     // MARK: - Skater Aggregates
 
     var gamesPlayed: Int { gameStats.count + goalieGameStats.count }

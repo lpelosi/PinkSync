@@ -819,4 +819,133 @@ enum APIClient {
         }
         return try JSONDecoder().decode([GameResponse].self, from: data)
     }
+
+    // MARK: - MVP Voting
+
+    struct MvpVotePlayer: Decodable, Hashable {
+        let playerId: String?
+        let playerName: String?
+        let playerNumber: Int?
+    }
+
+    struct MvpVoteStanding: Decodable, Identifiable {
+        let playerId: String?
+        let playerName: String?
+        let playerNumber: Int?
+        let votes: Int
+        let standing: Int?
+        let isWinner: Bool?
+        var id: String { playerId ?? "\(playerName ?? "")-\(playerNumber ?? 0)" }
+    }
+
+    struct MvpVoteBallot: Decodable {
+        let browserId: String?
+        let votedForPlayerId: String?
+        let voteCastAt: String?
+    }
+
+    struct MvpVoteFinalMvp: Decodable {
+        let playerId: String?
+        let playerName: String?
+        let playerNumber: Int?
+        let votes: Int?
+    }
+
+    /// Public MVP vote summary. Standings + finalMvp only populated after close.
+    struct MvpVoteSummary: Decodable {
+        let gameId: String?
+        let status: String
+        let totalEligibleCount: Int?
+        let totalBallotCount: Int
+        let votedCount: Int
+        let finalMvp: MvpVoteFinalMvp?
+        let standings: [MvpVoteStanding]?
+    }
+
+    /// Admin MVP vote summary — includes individual ballots for live tallying.
+    struct MvpVoteAdminSummary: Decodable {
+        let gameId: String?
+        let status: String
+        let totalEligibleCount: Int?
+        let totalBallotCount: Int
+        let votedCount: Int
+        let finalMvp: MvpVoteFinalMvp?
+        let ballots: [MvpVoteBallot]?
+        let lineup: [MvpVotePlayer]?
+    }
+
+    private struct MvpVoteSummaryEnvelope: Decodable {
+        let success: Bool
+        let summary: MvpVoteSummary?
+    }
+
+    private struct MvpVoteAdminSummaryEnvelope: Decodable {
+        let success: Bool
+        let summary: MvpVoteAdminSummary?
+    }
+
+    /// Fetch the public MVP vote status for a game (visible to anyone).
+    static func fetchMvpVoteStatus(gameId: String) async throws -> MvpVoteSummary? {
+        guard let url = URL(string: "\(baseURL)/api/games/\(gameId)/mvp-vote-status") else {
+            throw URLError(.badURL)
+        }
+        let request = try await authorizedRequest(url: url)
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse,
+              (200...299).contains(http.statusCode) else {
+            throw URLError(.badServerResponse)
+        }
+        return try JSONDecoder().decode(MvpVoteSummaryEnvelope.self, from: data).summary
+    }
+
+    /// Fetch the admin MVP vote summary (includes individual ballots for live tallying).
+    static func fetchMvpVoteAdminSummary(gameId: String) async throws -> MvpVoteAdminSummary? {
+        guard let url = URL(string: "\(baseURL)/api/games/\(gameId)/mvp-vote") else {
+            throw URLError(.badURL)
+        }
+        let request = try await authorizedRequest(url: url)
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse,
+              (200...299).contains(http.statusCode) else {
+            throw URLError(.badServerResponse)
+        }
+        return try JSONDecoder().decode(MvpVoteAdminSummaryEnvelope.self, from: data).summary
+    }
+
+    /// Close the MVP vote for a game (admin only). Returns the post-close public summary.
+    @discardableResult
+    static func closeMvpVote(gameId: String) async throws -> MvpVoteSummary? {
+        guard let url = URL(string: "\(baseURL)/api/games/\(gameId)/mvp-vote-close") else {
+            throw URLError(.badURL)
+        }
+        let request = try await authorizedRequest(url: url, method: "POST")
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse,
+              (200...299).contains(http.statusCode) else {
+            throw URLError(.badServerResponse)
+        }
+        return try JSONDecoder().decode(MvpVoteSummaryEnvelope.self, from: data).summary
+    }
+
+    /// Open (or reopen) MVP voting for a game (admin only). Duration in minutes.
+    @discardableResult
+    static func openMvpVote(gameId: String, durationMinutes: Int = 30) async throws -> MvpVoteSummary? {
+        guard let url = URL(string: "\(baseURL)/api/games/\(gameId)/mvp-vote-open") else {
+            throw URLError(.badURL)
+        }
+        var request = try await authorizedRequest(url: url, method: "POST")
+        let payload: [String: Any] = ["durationMinutes": durationMinutes]
+        request.httpBody = try JSONSerialization.data(withJSONObject: payload)
+
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse else {
+            throw URLError(.badServerResponse)
+        }
+        if !(200...299).contains(http.statusCode) {
+            let body = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+            let message = body?["message"] as? String ?? "Failed to open MVP voting"
+            throw NSError(domain: "MvpVote", code: http.statusCode, userInfo: [NSLocalizedDescriptionKey: message])
+        }
+        return try JSONDecoder().decode(MvpVoteSummaryEnvelope.self, from: data).summary
+    }
 }

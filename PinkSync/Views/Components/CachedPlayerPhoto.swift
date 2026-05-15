@@ -5,7 +5,6 @@ struct CachedPlayerPhoto: View {
     var size: CGFloat = 32
 
     @State private var image: UIImage?
-    @State private var loaded = false
 
     var body: some View {
         Group {
@@ -22,9 +21,9 @@ struct CachedPlayerPhoto: View {
         .frame(width: size, height: size)
         .clipShape(Circle())
         .task(id: url) {
-            guard !loaded, let url else { return }
+            image = nil
+            guard let url else { return }
             image = await PhotoCache.shared.image(for: url)
-            loaded = true
         }
     }
 }

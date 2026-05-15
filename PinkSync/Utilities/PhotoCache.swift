@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 import UIKit
 
@@ -6,6 +7,7 @@ actor PhotoCache {
 
     private let cacheDir: URL
     private var memory = NSCache<NSString, UIImage>()
+    private var inFlight: [URL: Task<UIImage?, Never>] = [:]
 
     private init() {
         let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
@@ -27,16 +29,27 @@ actor PhotoCache {
             return img
         }
 
-        guard let (data, response) = try? await URLSession.shared.data(from: url),
-              let http = response as? HTTPURLResponse,
-              (200...299).contains(http.statusCode),
-              let img = UIImage(data: data) else {
-            return nil
+        if let existing = inFlight[url] {
+            return await existing.value
         }
 
-        try? data.write(to: file, options: .atomic)
-        memory.setObject(img, forKey: key as NSString)
-        return img
+        let task = Task<UIImage?, Never> { [cacheDir] in
+            guard let (data, response) = try? await URLSession.shared.data(from: url),
+                  let http = response as? HTTPURLResponse,
+                  (200...299).contains(http.statusCode),
+                  let img = UIImage(data: data) else {
+                return nil
+            }
+            try? data.write(to: cacheDir.appendingPathComponent(key), options: .atomic)
+            return img
+        }
+        inFlight[url] = task
+        let result = await task.value
+        inFlight[url] = nil
+        if let result {
+            memory.setObject(result, forKey: key as NSString)
+        }
+        return result
     }
 
     func clearCache() {
@@ -46,6 +59,9 @@ actor PhotoCache {
     }
 
     private func cacheKey(for url: URL) -> String {
-        url.lastPathComponent
+        let hash = SHA256.hash(data: Data(url.absoluteString.utf8))
+        let hex = hash.compactMap { String(format: "%02x", $0) }.joined()
+        let ext = url.pathExtension.isEmpty ? "img" : url.pathExtension
+        return "\(hex).\(ext)"
     }
 }
