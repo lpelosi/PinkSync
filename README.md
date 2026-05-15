@@ -73,6 +73,7 @@ PinkSync/
 │   │   ├── ShootoutView.swift      # Round-by-round shootout tracker
 │   │   ├── GameSummaryView.swift   # Full game summary with per-period breakdown
 │   │   ├── GameStatsEditorView.swift # Manual stat editing
+│   │   ├── MvpVoteView.swift       # Admin MVP voting (open/close/live tallies)
 │   │   └── ScheduleFormView.swift  # Schedule bout creation
 │   │   └── LiveGame/               # Real-time stat tracking
 │   │       ├── LiveGameView.swift          # Live game UI with scoreboard + event feed
@@ -117,6 +118,7 @@ PinkSync/
 12. **Save & Send** — submits the game to the backend API, which updates the website automatically
 13. **Edit & re-send** — fix errors after sending; the API upserts by gameId
 14. **Reset to Bout** — clears all stats and events for a game and returns it to the schedule as an upcoming bout (admin only, games linked to a schedule entry)
+15. **MVP Voting management** — for synced games, admins can open, close, or reopen MVP voting from the app. The MVP Voting view shows the current status, total ballots cast, live per-player tallies (e.g., `Sela 'Tequila' Dieden — 5 Votes`), and the final winner once voting closes. Tallies auto-refresh every 2 seconds while voting is open (every 30 seconds when closed).
 
 ### Stat Tracking (NHL-aligned)
 - **Skaters**: GP, G, A, P, +/-, PPG, PPA, SHG, SHA, GWG, PIM, Shots, Hits, Blocks, FO W/L, TOI
@@ -135,9 +137,11 @@ PinkSync/
 
 ### Player Photos
 - Photos are synced from the server during roster sync (pull-to-refresh on the Roster tab)
-- The server resolves photos by player number (`/img/players/{number}.png`) with a `default.jpg` fallback
+- The server resolves photos by checking `jerseyDisplay` first, then `number`, against `png`/`jpg`/`jpeg` extensions, with `default.jpg` as a final fallback
 - Photos uploaded via the app are stored by playerId and take priority over number-based photos
-- A two-tier cache (in-memory + on-disk) stores photos locally so subsequent app launches display instantly without network calls
+- The server appends a `?v=<mtime>` cache-busting query string so re-uploaded photos invalidate automatically on every client
+- **`PhotoCache`** — a two-tier (in-memory `NSCache` + on-disk) actor-based cache. Photos are keyed by SHA-256 of their full URL so cache busting is automatic. In-flight requests for the same URL are coalesced into a single network call.
+- **`CachedPlayerPhoto`** — drop-in SwiftUI view used by `PlayerRow`, `PlayerDetailView`, and `PlayerFormView` to display cached photos with a `person.circle.fill` fallback
 
 ### Tabs
 - **Games** — upcoming bouts, active games, create new games, live stat tracking
@@ -182,6 +186,10 @@ The app communicates with an Express.js API server. The server code lives in the
 | `GET` | `/api/schedule` | Scheduled bouts (read key) |
 | `POST` | `/api/schedule` | Add a schedule entry (schedule_manager/admin) |
 | `DELETE`| `/api/schedule/:id` | Remove a schedule entry (schedule_manager/admin) |
+| `GET` | `/api/games/:gameId/mvp-vote` | Admin MVP vote summary with individual ballots (admin) |
+| `GET` | `/api/games/:gameId/mvp-vote-status` | Public MVP vote summary (read key) |
+| `POST` | `/api/games/:gameId/mvp-vote-open` | Open or reopen MVP voting (admin) |
+| `POST` | `/api/games/:gameId/mvp-vote-close` | Close active MVP voting (admin) |
 
 ### Server Configuration
 
