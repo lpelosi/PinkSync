@@ -25,6 +25,12 @@ struct GameDetailView: View {
     @State private var showingResetError = false
     @State private var isResetting = false
     @State private var showingLineupPicker = false
+    @State private var mvpVoteSummary: APIClient.MvpVoteSummary?
+    @State private var isLoadingMvpVote = false
+    @State private var isClosingMvpVote = false
+    @State private var mvpVoteError: String?
+    @State private var showingMvpVoteError = false
+    @State private var showingCloseMvpVoteConfirm = false
 
     private var goalies: [Player] {
         allPlayers.filter { $0.isGoalie }
@@ -215,6 +221,10 @@ struct GameDetailView: View {
                 }
             }
 
+            if game.isSynced {
+                mvpVoteSection
+            }
+
             // MARK: - Save & Send
             if authManager.canManageGames {
                 Section {
@@ -290,6 +300,19 @@ struct GameDetailView: View {
         } message: {
             Text(resetError ?? "Unknown error")
         }
+        .alert("End MVP Vote Early?", isPresented: $showingCloseMvpVoteConfirm) {
+            Button("Cancel", role: .cancel) {}
+            Button("End Vote", role: .destructive) {
+                Task { await closeMvpVote() }
+            }
+        } message: {
+            Text("This closes player voting now and shows the final MVP result.")
+        }
+        .alert("MVP Vote Error", isPresented: $showingMvpVoteError) {
+            Button("OK") {}
+        } message: {
+            Text(mvpVoteError ?? "Unknown error")
+        }
         .sheet(isPresented: $showingGoaliePicker) {
             NavigationStack {
                 GoaliePickerView(game: game, goalies: goalies)
@@ -332,9 +355,91 @@ struct GameDetailView: View {
                 liveVM = nil
             }
         }
+        .task(id: game.gameId) {
+            await loadMvpVoteStatus()
+        }
     }
 
     // MARK: - Helpers
+
+    private var mvpVoteSection: some View {
+        Section("MVP Vote") {
+            if isLoadingMvpVote && mvpVoteSummary == nil {
+                HStack {
+                    ProgressView()
+                    Text("Loading vote status")
+                        .foregroundStyle(.secondary)
+                }
+            } else if let summary = mvpVoteSummary {
+                VStack(alignment: .leading, spacing: 10) {
+                    HStack(spacing: 10) {
+                        Image(systemName: mvpVoteStatusIcon(summary))
+                            .foregroundStyle(mvpVoteStatusColor(summary))
+
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(mvpVoteStatusLabel(summary))
+                                .font(.subheadline.weight(.semibold))
+                                .foregroundStyle(mvpVoteStatusColor(summary))
+                            Text(mvpVoteCountText(summary))
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+
+                        Spacer()
+                    }
+
+                    if summary.status == "open", let closesAt = summary.closesAt {
+                        Text("Closes \(formatVoteDate(closesAt))")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    } else if summary.status == "closed" {
+                        if let finalMvp = summary.finalMvp {
+                            Text("Winner: #\(finalMvp.playerNumber) \(finalMvp.playerName)")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        } else {
+                            Text("Voting closed with no ballots.")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    } else if summary.status == "blocked" {
+                        Text("Voting could not open for this game.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
+                if authManager.canManageGames && summary.status == "open" {
+                    Button(role: .destructive) {
+                        showingCloseMvpVoteConfirm = true
+                    } label: {
+                        HStack {
+                            Spacer()
+                            if isClosingMvpVote {
+                                ProgressView()
+                            } else {
+                                Label("End Early", systemImage: "stop.circle")
+                                    .font(.headline)
+                            }
+                            Spacer()
+                        }
+                        .padding(.vertical, 4)
+                    }
+                    .disabled(isClosingMvpVote)
+                }
+            } else {
+                Text("No MVP vote found for this game yet.")
+                    .foregroundStyle(.secondary)
+            }
+
+            Button {
+                Task { await loadMvpVoteStatus() }
+            } label: {
+                Label("Refresh Vote Status", systemImage: "arrow.clockwise")
+            }
+            .disabled(isLoadingMvpVote)
+        }
+    }
 
     private func playerStats(for player: Player) -> GamePlayerStats? {
         game.playerStats.first { $0.player?.persistentModelID == player.persistentModelID }
@@ -381,6 +486,7 @@ struct GameDetailView: View {
             try await APIClient.sendGameStats(game: game)
             game.isSynced = true
             try? modelContext.save()
+            await loadMvpVoteStatus()
 
             // Upload opponent logo if we have one (user photo or asset catalog)
             if let opponentTeam = savedTeams.first(where: { $0.name == game.opponent }) {
@@ -397,6 +503,78 @@ struct GameDetailView: View {
             showingSendError = true
         }
         isSending = false
+    }
+
+    private func loadMvpVoteStatus() async {
+        guard game.isSynced, !game.gameId.isEmpty else {
+            mvpVoteSummary = nil
+            return
+        }
+
+        isLoadingMvpVote = true
+        defer { isLoadingMvpVote = false }
+
+        do {
+            mvpVoteSummary = try await APIClient.fetchMvpVoteStatus(gameId: game.gameId)
+        } catch {
+            mvpVoteError = error.localizedDescription
+            showingMvpVoteError = true
+        }
+    }
+
+    private func closeMvpVote() async {
+        guard !game.gameId.isEmpty else { return }
+
+        isClosingMvpVote = true
+        defer { isClosingMvpVote = false }
+
+        do {
+            mvpVoteSummary = try await APIClient.closeMvpVote(gameId: game.gameId)
+        } catch {
+            mvpVoteError = error.localizedDescription
+            showingMvpVoteError = true
+        }
+    }
+
+    private func mvpVoteStatusLabel(_ summary: APIClient.MvpVoteSummary) -> String {
+        switch summary.status {
+        case "open": "Voting Live"
+        case "closed": "Voting Closed"
+        case "blocked": "Vote Unavailable"
+        default: "Vote Status"
+        }
+    }
+
+    private func mvpVoteStatusIcon(_ summary: APIClient.MvpVoteSummary) -> String {
+        switch summary.status {
+        case "open": "checkmark.circle.fill"
+        case "closed": "lock.circle.fill"
+        case "blocked": "exclamationmark.triangle.fill"
+        default: "info.circle"
+        }
+    }
+
+    private func mvpVoteStatusColor(_ summary: APIClient.MvpVoteSummary) -> Color {
+        switch summary.status {
+        case "open": AppTheme.teal
+        case "closed": AppTheme.pink
+        case "blocked": .orange
+        default: .secondary
+        }
+    }
+
+    private func mvpVoteCountText(_ summary: APIClient.MvpVoteSummary) -> String {
+        let label = summary.totalBallotCount == 1 ? "vote" : "votes"
+        if summary.votedCount != summary.totalBallotCount {
+            return "\(summary.totalBallotCount) \(label) received, \(summary.votedCount) counted"
+        }
+        return "\(summary.totalBallotCount) \(label) received"
+    }
+
+    private func formatVoteDate(_ value: String) -> String {
+        let formatter = ISO8601DateFormatter()
+        guard let date = formatter.date(from: value) else { return value }
+        return date.formatted(date: .omitted, time: .shortened)
     }
 }
 

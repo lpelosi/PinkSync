@@ -529,6 +529,75 @@ enum APIClient {
         }
     }
 
+    // MARK: - MVP Vote
+
+    struct MvpVoteStatusResponse: Decodable {
+        let success: Bool
+        let summary: MvpVoteSummary?
+        let message: String?
+    }
+
+    struct MvpVoteSummary: Decodable {
+        let gameId: String
+        let status: String
+        let openedAt: String?
+        let closesAt: String?
+        let closedAt: String?
+        let blockedReason: String?
+        let totalEligibleCount: Int
+        let totalBallotCount: Int
+        let votedCount: Int
+        let finalMvp: MvpVotePlayer?
+    }
+
+    struct MvpVotePlayer: Decodable {
+        let playerId: String
+        let playerName: String
+        let playerNumber: Int
+        let position: String
+        let votes: Int?
+    }
+
+    static func fetchMvpVoteStatus(gameId: String) async throws -> MvpVoteSummary? {
+        guard !gameId.isEmpty else { return nil }
+        guard let url = URL(string: "\(baseURL)/api/games/\(gameId)/mvp-vote-status") else {
+            throw URLError(.badURL)
+        }
+
+        let request = try await authorizedRequest(url: url)
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse else {
+            throw URLError(.badServerResponse)
+        }
+        guard (200...299).contains(http.statusCode) else {
+            let body = try? JSONDecoder().decode(MvpVoteStatusResponse.self, from: data)
+            throw AuthAPIError.registrationFailed(body?.message ?? "Could not load MVP vote status.")
+        }
+
+        let result = try JSONDecoder().decode(MvpVoteStatusResponse.self, from: data)
+        return result.summary
+    }
+
+    static func closeMvpVote(gameId: String) async throws -> MvpVoteSummary? {
+        guard !gameId.isEmpty else { return nil }
+        guard let url = URL(string: "\(baseURL)/api/games/\(gameId)/mvp-vote-close") else {
+            throw URLError(.badURL)
+        }
+
+        let request = try await authorizedRequest(url: url, method: "POST")
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse else {
+            throw URLError(.badServerResponse)
+        }
+        guard (200...299).contains(http.statusCode) else {
+            let body = try? JSONDecoder().decode(MvpVoteStatusResponse.self, from: data)
+            throw AuthAPIError.registrationFailed(body?.message ?? "Could not end MVP voting early.")
+        }
+
+        let result = try JSONDecoder().decode(MvpVoteStatusResponse.self, from: data)
+        return result.summary
+    }
+
     struct TeamLogoPayload: Encodable {
         let teamName: String
         let logoBase64: String
