@@ -99,12 +99,13 @@ struct RosterView: View {
 
             for remote in serverRoster {
                 if let local = players.first(where: { $0.playerId == remote.playerId }) {
-                    // Update existing player
+                    // Update existing player — server is authoritative
                     local.name = remote.name
                     local.number = remote.number
                     local.position = remote.position
                     local.isGoalie = remote.isGoalie
                     local.isActive = remote.isActive
+                    local.isSubstitute = remote.isSubstitute ?? false
                     local.photoPath = remote.photo
                 } else {
                     // Create new player from server
@@ -116,6 +117,7 @@ struct RosterView: View {
                         isActive: remote.isActive
                     )
                     newPlayer.playerId = remote.playerId
+                    newPlayer.isSubstitute = remote.isSubstitute ?? false
                     newPlayer.photoPath = remote.photo
                     // Assign to the team
                     let teamDescriptor = FetchDescriptor<Team>(

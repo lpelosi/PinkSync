@@ -13,6 +13,11 @@ final class Player {
     var isGoalie: Bool
     var isActive: Bool
 
+    /// True for substitute players who borrow other players' jerseys.
+    /// Subs don't have a permanent number — `number` should be ignored and `—` shown instead.
+    /// Default false allows lightweight SwiftData migration for existing players.
+    var isSubstitute: Bool = false
+
     /// Server URL path for the player photo (e.g., "/img/players/uuid.jpg").
     /// Optional with nil default for lightweight SwiftData migration.
     var photoPath: String? = nil
@@ -45,7 +50,18 @@ final class Player {
     // MARK: - Display
 
     var displayNumber: String {
-        number > 0 ? "#\(number)" : "--"
+        if isSubstitute { return "—" }
+        if number < 0 { return "—" }
+        if number == 0 { return "#00" }
+        return "#\(number)"
+    }
+
+    /// Number-only string for compact UI (no `#`). Substitutes render as `—`.
+    var jerseyText: String {
+        if isSubstitute { return "—" }
+        if number < 0 { return "—" }
+        if number == 0 { return "00" }
+        return "\(number)"
     }
 
     var lastName: String {

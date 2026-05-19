@@ -7,6 +7,7 @@ struct GamesListView: View {
     @Query(sort: \OpponentTeam.name) private var savedTeams: [OpponentTeam]
     @Environment(\.modelContext) private var modelContext
     @Environment(AuthManager.self) private var authManager
+    @Environment(SyncManager.self) private var syncManager
     @State private var showingAddGame = false
     @State private var showingAddBout = false
     @State private var gameToDelete: Game?
@@ -49,6 +50,43 @@ struct GamesListView: View {
                 }
                 .frame(maxWidth: .infinity)
                 .listRowBackground(Color.clear)
+            }
+
+            // Pending send queue
+            if syncManager.pendingCount > 0 {
+                Section {
+                    HStack(spacing: 10) {
+                        Image(systemName: syncManager.isOnline ? "arrow.triangle.2.circlepath" : "wifi.slash")
+                            .foregroundStyle(.orange)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("\(syncManager.pendingCount) game\(syncManager.pendingCount == 1 ? "" : "s") waiting to send")
+                                .font(.subheadline.weight(.semibold))
+                                .foregroundStyle(.orange)
+                            if !syncManager.isOnline {
+                                Text("Will retry when back online")
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                        Spacer()
+                        if syncManager.isRetrying {
+                            ProgressView()
+                        } else if syncManager.isOnline {
+                            Button("Retry") {
+                                Task { await syncManager.retryNow() }
+                            }
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(AppTheme.pink)
+                        }
+                    }
+                }
+            } else if !syncManager.isOnline {
+                // Show offline indicator even without a queue
+                Section {
+                    Label("Offline", systemImage: "wifi.slash")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                }
             }
 
             // Sync status
@@ -441,11 +479,32 @@ struct GamesListView: View {
                 assists: remoteStat.assists ?? 0,
                 hits: remoteStat.hits ?? 0,
                 blocks: remoteStat.blocks ?? 0,
-                penaltyMinutes: remoteStat.penaltyMinutes ?? 0
+                penaltyMinutes: remoteStat.penaltyMinutes ?? 0,
+                powerPlayGoals: remoteStat.powerPlayGoals ?? 0,
+                shortHandedGoals: remoteStat.shortHandedGoals ?? 0,
+                powerPlayAssists: remoteStat.powerPlayAssists ?? 0,
+                shortHandedAssists: remoteStat.shortHandedAssists ?? 0,
+                gameWinningGoals: remoteStat.gameWinningGoals ?? 0,
+                faceoffWins: remoteStat.faceoffWins ?? 0,
+                faceoffLosses: remoteStat.faceoffLosses ?? 0,
+                timeOnIce: remoteStat.timeOnIce ?? 0,
+                plusMinus: remoteStat.plusMinus ?? 0
             )
             stat.player = findPlayer(remoteStat.playerId, number: remoteStat.playerNumber, playerById: playerById, playerByNumber: playerByNumber)
             game.playerStats.append(stat)
             modelContext.insert(stat)
+
+            // Hydrate per-shift records
+            for remoteShift in remoteStat.shifts ?? [] {
+                let shift = PlayerShift(
+                    period: remoteShift.period,
+                    duration: remoteShift.duration,
+                    startClockTime: remoteShift.startClockTime ?? "",
+                    endClockTime: remoteShift.endClockTime ?? ""
+                )
+                shift.gamePlayerStats = stat
+                modelContext.insert(shift)
+            }
         }
     }
 

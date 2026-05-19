@@ -33,6 +33,7 @@ struct PlayerFormView: View {
     @State private var number = ""
     @State private var position = "Forward"
     @State private var isGoalie = false
+    @State private var isSubstitute = false
 
     @State private var selectedPhotoItem: PhotosPickerItem?
     @State private var selectedPhotoData: Data?
@@ -117,6 +118,12 @@ struct PlayerFormView: View {
 
                 Toggle("Also plays Goalie", isOn: $isGoalie)
             }
+
+            Section {
+                Toggle("Substitute Player", isOn: $isSubstitute)
+            } footer: {
+                Text("Subs don't have a permanent jersey number — they wear another player's jersey on a game-by-game basis. Their existing stats are preserved.")
+            }
         }
         .navigationTitle(isEditing ? "Edit Player" : "Add Player")
         .toolbar {
@@ -146,6 +153,7 @@ struct PlayerFormView: View {
                 number = "\(player.number)"
                 position = player.position
                 isGoalie = player.isGoalie
+                isSubstitute = player.isSubstitute
                 existingPhotoURL = player.photoURL
             }
         }
@@ -168,6 +176,7 @@ struct PlayerFormView: View {
                     isGoalie: isGoalie || position == "Goalie"
                 )
                 player.playerId = UUID().uuidString.uppercased()
+                player.isSubstitute = isSubstitute
                 let teamDescriptor = FetchDescriptor<Team>(
                     predicate: #Predicate { $0.name == "Frozen Flamingos" }
                 )
@@ -180,13 +189,15 @@ struct PlayerFormView: View {
             case .edit(let existing):
                 let goalieFlag = isGoalie || position == "Goalie"
                 if existing.name != name || existing.number != num ||
-                   existing.position != position || existing.isGoalie != goalieFlag {
+                   existing.position != position || existing.isGoalie != goalieFlag ||
+                   existing.isSubstitute != isSubstitute {
                     playerInfoChanged = true
                 }
                 existing.name = name
                 existing.number = num
                 existing.position = position
                 existing.isGoalie = goalieFlag
+                existing.isSubstitute = isSubstitute
                 player = existing
             }
 

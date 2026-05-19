@@ -349,7 +349,7 @@ struct GameSummaryView: View {
                     ForEach(skaterStats) { stat in
                         if let player = stat.player {
                             HStack(spacing: 0) {
-                                Text(player.number > 0 ? "\(player.number)" : "--")
+                                Text(player.jerseyText)
                                     .frame(width: 30, alignment: .leading)
                                 Text(player.name)
                                     .lineLimit(1)

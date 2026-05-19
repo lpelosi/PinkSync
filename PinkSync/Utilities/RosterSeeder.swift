@@ -109,17 +109,9 @@ enum RosterSeeder {
                 }
             }
 
-            // Sync number and name from rosterData for players with a known playerId
-            if !player.playerId.isEmpty, let canonical = rosterByPlayerId[player.playerId] {
-                if player.number != canonical.number {
-                    player.number = canonical.number
-                    changed = true
-                }
-                if player.name != canonical.name {
-                    player.name = canonical.name
-                    changed = true
-                }
-            }
+            // Server is the source of truth for name/number. The seed data is only used
+            // here to backfill playerId for legacy local records — never to overwrite
+            // numbers or names that may have been updated server-side.
         }
 
         if changed {

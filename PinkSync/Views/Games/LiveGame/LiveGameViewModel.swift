@@ -134,6 +134,10 @@ final class LiveGameViewModel: Identifiable {
     // Game position assignment (C, LW, RW, LD, RD)
     var playerGamePosition: [PersistentIdentifier: String] = [:]
 
+    /// Per-game role override ("Forward" or "Defense") for players whose roster position
+    /// differs from where they're slotted for this game. Empty/missing means use roster position.
+    var playerGameRole: [PersistentIdentifier: String] = [:]
+
     private let haptic = UIImpactFeedbackGenerator(style: .medium)
 
     init(game: Game, modelContext: ModelContext) {
@@ -149,7 +153,12 @@ final class LiveGameViewModel: Identifiable {
     var skaters: [Player] {
         checkedInPlayers
             .filter { $0.persistentModelID != activeGoalie?.persistentModelID }
-            .sorted { $0.number < $1.number }
+            .sorted { sortKey(for: $0) < sortKey(for: $1) }
+    }
+
+    /// Sort key honoring per-game overrides. Subs with no override sort to the end.
+    func sortKey(for player: Player) -> Int {
+        effectiveNumber(for: player) ?? Int.max
     }
 
     var filteredSkaters: [Player] {
@@ -181,7 +190,7 @@ final class LiveGameViewModel: Identifiable {
                 let posA = Self.positionOrder[playerGamePosition[a.persistentModelID] ?? ""] ?? 5
                 let posB = Self.positionOrder[playerGamePosition[b.persistentModelID] ?? ""] ?? 5
                 if posA != posB { return posA < posB }
-                return a.number < b.number
+                return sortKey(for: a) < sortKey(for: b)
             }
     }
 
@@ -193,7 +202,7 @@ final class LiveGameViewModel: Identifiable {
         let goalieId = activeGoalie?.persistentModelID
         return checkedInPlayers
             .filter { !onIcePlayers.contains($0.persistentModelID) && $0.persistentModelID != goalieId }
-            .sorted { $0.number < $1.number }
+            .sorted { sortKey(for: $0) < sortKey(for: $1) }
     }
 
     func putPlayerOnIce(_ player: Player) {
@@ -230,7 +239,7 @@ final class LiveGameViewModel: Identifiable {
         for player in checkedInPlayers where onIcePlayers.contains(player.persistentModelID) && player.persistentModelID != goalieId {
             // Skip players without a line assignment (rolling players stay on ice)
             guard playerLines[player.persistentModelID] != nil else { continue }
-            let playerIsForward = isForwardPosition(player.position)
+            let playerIsForward = isForwardForGame(player)
             if (isForwardLine && playerIsForward) || (!isForwardLine && !playerIsForward) {
                 takePlayerOffIce(player)
             }
@@ -244,6 +253,33 @@ final class LiveGameViewModel: Identifiable {
 
     func isForwardPosition(_ position: String) -> Bool {
         ["Forward", "Center", "Left Wing", "Right Wing"].contains(position)
+    }
+
+    /// Per-game effective role. Returns the override if set, otherwise derived from the roster position.
+    func effectiveRole(for player: Player) -> String {
+        if let override = playerGameRole[player.persistentModelID], !override.isEmpty {
+            return override
+        }
+        return isForwardPosition(player.position) ? "Forward" : "Defense"
+    }
+
+    func isForwardForGame(_ player: Player) -> Bool {
+        effectiveRole(for: player) == "Forward"
+    }
+
+    /// Flip a player's game-only role. Clears their position/line assignments since
+    /// a Forward's "C" doesn't carry over to Defense pairings.
+    func setGameRole(_ role: String, for player: Player) {
+        let id = player.persistentModelID
+        let rosterIsForward = isForwardPosition(player.position)
+        let matchesRoster = (role == "Forward" && rosterIsForward) || (role == "Defense" && !rosterIsForward)
+        if matchesRoster {
+            playerGameRole.removeValue(forKey: id)
+        } else {
+            playerGameRole[id] = role
+        }
+        playerGamePosition.removeValue(forKey: id)
+        playerLines.removeValue(forKey: id)
     }
 
     func onIcePlayerIdString() -> String {
@@ -454,8 +490,31 @@ final class LiveGameViewModel: Identifiable {
     }
 
     func playerLabel(_ player: Player) -> String {
-        let name = player.name.components(separatedBy: " ").last ?? player.name
-        return "#\(player.number > 0 ? "\(player.number)" : "?") \(name)"
+        "\(displayNumber(for: player)) \(player.lastName)"
+    }
+
+    /// Per-game jersey number for this player. Returns nil if no number applies (sub with no override).
+    func effectiveNumber(for player: Player) -> Int? {
+        if let stat = game.playerStats.first(where: { $0.player?.persistentModelID == player.persistentModelID }),
+           let override = stat.gameJerseyNumber {
+            return override
+        }
+        if player.isSubstitute { return nil }
+        return player.number
+    }
+
+    /// Plain number text for compact tiles (no `#`). Returns "—" when no number applies.
+    func jerseyText(for player: Player) -> String {
+        guard let n = effectiveNumber(for: player), n >= 0 else { return "—" }
+        if n == 0 { return "00" }
+        return "\(n)"
+    }
+
+    /// `#NN` style text for headers/labels. Returns "—" when no number applies.
+    func displayNumber(for player: Player) -> String {
+        guard let n = effectiveNumber(for: player), n >= 0 else { return "—" }
+        if n == 0 { return "#00" }
+        return "#\(n)"
     }
 
     private func createEvent(
@@ -476,10 +535,13 @@ final class LiveGameViewModel: Identifiable {
             type: type,
             period: currentPeriod,
             clockTime: resolvedClockTime,
+            playerId: player?.playerId ?? "",
             playerName: player?.name ?? "",
             playerNumber: player?.number ?? 0,
+            assist1Id: assist1?.playerId ?? "",
             assist1Name: assist1?.name ?? "",
             assist1Number: assist1?.number ?? 0,
+            assist2Id: assist2?.playerId ?? "",
             assist2Name: assist2?.name ?? "",
             assist2Number: assist2?.number ?? 0,
             penaltyMinutes: penaltyMinutes,

@@ -115,7 +115,7 @@ struct LineupCheckInView: View {
     @ViewBuilder
     private func playerCircle(_ player: Player, checked: Bool, locked: Bool) -> some View {
         VStack(spacing: 4) {
-            Text(player.number > 0 ? "\(player.number)" : "—")
+            Text(player.jerseyText)
                 .font(.system(size: 28, weight: .bold, design: .monospaced))
                 .foregroundStyle(checked ? .white : .secondary)
             Text(player.lastName)

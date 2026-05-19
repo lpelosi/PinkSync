@@ -108,7 +108,8 @@ struct LiveGameView: View {
                         }
                         pendingAction = nil
                     },
-                    benchPlayers: vm.skaters
+                    benchPlayers: vm.skaters,
+                    jerseyText: { vm.jerseyText(for: $0) }
                 )
                 .presentationDetents([.medium, .large])
             case .goalFlow:
@@ -121,12 +122,14 @@ struct LiveGameView: View {
                     isOurs: true,
                     players: vm.onIceSkatersSorted,
                     excluded: [],
-                    benchPlayers: vm.skaters
-                ) { player, _, type, clockTime in
-                    if let player {
-                        vm.recordPenalty(player: player, type: type, clockTime: clockTime)
-                    }
-                }
+                    benchPlayers: vm.skaters,
+                    onRecord: { player, _, type, clockTime in
+                        if let player {
+                            vm.recordPenalty(player: player, type: type, clockTime: clockTime)
+                        }
+                    },
+                    jerseyText: { vm.jerseyText(for: $0) }
+                )
                 .presentationDetents([.large])
             case .opponentPenalty:
                 PenaltyEntryView(
@@ -152,12 +155,14 @@ struct LiveGameView: View {
                     players: vm.skaters,
                     title: "Who's shooting?",
                     skipLabel: nil,
-                    excluded: []
-                ) { player in
-                    guard let player else { return }
-                    shootoutPlayerPicked = player
-                    showingShootoutResult = true
-                }
+                    excluded: [],
+                    onPick: { player in
+                        guard let player else { return }
+                        shootoutPlayerPicked = player
+                        showingShootoutResult = true
+                    },
+                    jerseyText: { vm.jerseyText(for: $0) }
+                )
                 .presentationDetents([.medium])
             case .lineSetup:
                 LineSetupSheet(vm: vm)
@@ -451,7 +456,7 @@ struct LiveGameView: View {
                                     }
                                     .frame(width: 42, height: pos.isEmpty ? 36 : 42)
                                     .background(
-                                        vm.isForwardPosition(player.position) ? AppTheme.pink : AppTheme.teal,
+                                        vm.isForwardForGame(player) ? AppTheme.pink : AppTheme.teal,
                                         in: RoundedRectangle(cornerRadius: 6)
                                     )
                                 }
@@ -903,7 +908,7 @@ private struct FaceoffPickerSheet: View {
                 if let center = centerPlayer {
                     VStack(spacing: 0) {
                         VStack(spacing: 4) {
-                            Text(center.number > 0 ? "\(center.number)" : "—")
+                            Text(vm.jerseyText(for: center))
                                 .font(.system(size: 40, weight: .bold, design: .monospaced))
                                 .foregroundStyle(.white)
                             Text(center.lastName)
@@ -981,7 +986,7 @@ private struct FaceoffPickerSheet: View {
     private func faceoffPlayerCard(_ player: Player) -> some View {
         VStack(spacing: 0) {
             VStack(spacing: 4) {
-                Text(player.number > 0 ? "\(player.number)" : "—")
+                Text(vm.jerseyText(for: player))
                     .font(.system(size: 22, weight: .bold, design: .monospaced))
                     .foregroundStyle(.white)
                 Text(player.lastName)
@@ -1031,22 +1036,20 @@ private struct LineSetupSheet: View {
     @Environment(\.dismiss) private var dismiss
 
     private var forwards: [Player] {
-        vm.skaters.filter { $0.position == "Forward" || $0.position == "Center" || $0.position == "Left Wing" || $0.position == "Right Wing" }
+        vm.skaters.filter { vm.effectiveRole(for: $0) == "Forward" }
     }
 
     private var defensemen: [Player] {
-        vm.skaters.filter { $0.position == "Defense" || $0.position == "Left Defense" || $0.position == "Right Defense" }
+        vm.skaters.filter { vm.effectiveRole(for: $0) == "Defense" }
     }
 
-    private var unassigned: [Player] {
-        vm.skaters.filter { p in !forwards.contains(where: { $0.id == p.id }) && !defensemen.contains(where: { $0.id == p.id }) }
-    }
+    private var unassigned: [Player] { [] }
 
     var body: some View {
         NavigationStack {
             List {
                 Section {
-                    Text("Assign positions, then lines. Players without a line will stay on ice during line changes (rolling).")
+                    Text("Assign positions, then lines. Swipe a player to move them to the other group for this game only — their roster position is unchanged. Players without a line will stay on ice during line changes (rolling).")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -1055,11 +1058,14 @@ private struct LineSetupSheet: View {
                     ForEach(forwards) { player in
                         VStack(spacing: 6) {
                             HStack {
-                                Text(player.number > 0 ? "#\(player.number)" : "--")
+                                Text(vm.displayNumber(for: player))
                                     .font(.system(.body, design: .monospaced, weight: .bold))
                                     .frame(width: 40)
                                 Text(player.name)
                                     .lineLimit(1)
+                                if vm.playerGameRole[player.persistentModelID] == "Forward" {
+                                    overrideBadge("Playing F")
+                                }
                                 Spacer()
                             }
                             HStack(spacing: 8) {
@@ -1084,6 +1090,14 @@ private struct LineSetupSheet: View {
                             }
                         }
                         .padding(.vertical, 2)
+                        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                            Button {
+                                vm.setGameRole("Defense", for: player)
+                            } label: {
+                                Label("Move to D", systemImage: "arrow.right")
+                            }
+                            .tint(AppTheme.teal)
+                        }
                     }
                 }
 
@@ -1091,11 +1105,14 @@ private struct LineSetupSheet: View {
                     ForEach(defensemen) { player in
                         VStack(spacing: 6) {
                             HStack {
-                                Text(player.number > 0 ? "#\(player.number)" : "--")
+                                Text(vm.displayNumber(for: player))
                                     .font(.system(.body, design: .monospaced, weight: .bold))
                                     .frame(width: 40)
                                 Text(player.name)
                                     .lineLimit(1)
+                                if vm.playerGameRole[player.persistentModelID] == "Defense" {
+                                    overrideBadge("Playing D")
+                                }
                                 Spacer()
                             }
                             HStack(spacing: 8) {
@@ -1118,49 +1135,17 @@ private struct LineSetupSheet: View {
                             }
                         }
                         .padding(.vertical, 2)
-                    }
-                }
-
-                if !unassigned.isEmpty {
-                    Section("Other") {
-                        ForEach(unassigned) { player in
-                            VStack(spacing: 6) {
-                                HStack {
-                                    Text(player.number > 0 ? "#\(player.number)" : "--")
-                                        .font(.system(.body, design: .monospaced, weight: .bold))
-                                        .frame(width: 40)
-                                    Text(player.name)
-                                        .lineLimit(1)
-                                    Spacer()
-                                }
-                                HStack(spacing: 8) {
-                                    Picker("Pos", selection: positionBinding(for: player)) {
-                                        Text("—").tag("")
-                                        Text("C").tag("C")
-                                        Text("LW").tag("LW")
-                                        Text("RW").tag("RW")
-                                        Text("LD").tag("LD")
-                                        Text("RD").tag("RD")
-                                    }
-                                    .pickerStyle(.menu)
-
-                                    Picker("Line", selection: lineBinding(for: player)) {
-                                        Text("—").tag("")
-                                        Text("F1").tag("F1")
-                                        Text("F2").tag("F2")
-                                        Text("F3").tag("F3")
-                                        Text("F4").tag("F4")
-                                        Text("D1").tag("D1")
-                                        Text("D2").tag("D2")
-                                        Text("D3").tag("D3")
-                                    }
-                                    .pickerStyle(.menu)
-                                }
+                        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                            Button {
+                                vm.setGameRole("Forward", for: player)
+                            } label: {
+                                Label("Move to F", systemImage: "arrow.left")
                             }
-                            .padding(.vertical, 2)
+                            .tint(AppTheme.pink)
                         }
                     }
                 }
+
             }
             .navigationTitle("Set Up Lines")
             .navigationBarTitleDisplayMode(.inline)
@@ -1171,6 +1156,15 @@ private struct LineSetupSheet: View {
                 }
             }
         }
+    }
+
+    private func overrideBadge(_ text: String) -> some View {
+        Text(text)
+            .font(.system(size: 10, weight: .bold))
+            .foregroundStyle(.white)
+            .padding(.horizontal, 6)
+            .padding(.vertical, 2)
+            .background(AppTheme.teal, in: Capsule())
     }
 
     private func lineBinding(for player: Player) -> Binding<String> {
@@ -1285,7 +1279,7 @@ private struct GoalFlowSheet: View {
         vm.skaters
             .filter { !excluded.contains($0.persistentModelID) }
             .filter { p in !vm.onIcePlayers.contains(p.persistentModelID) }
-            .sorted { $0.number < $1.number }
+            .sorted { vm.sortKey(for: $0) < vm.sortKey(for: $1) }
     }
 
     private let columns = [GridItem(.adaptive(minimum: 80), spacing: 12)]
@@ -1368,7 +1362,7 @@ private struct GoalFlowSheet: View {
             pickPlayer(player)
         } label: {
             VStack(spacing: 4) {
-                Text(player.number > 0 ? "\(player.number)" : "—")
+                Text(vm.jerseyText(for: player))
                     .font(.system(size: 28, weight: .bold, design: .monospaced))
                     .foregroundStyle(.white)
                 Text(player.lastName)
@@ -1643,7 +1637,7 @@ private struct EventEditSheet: View {
                         selectedPlayer = player
                     } label: {
                         VStack(spacing: 2) {
-                            Text(player.number > 0 ? "\(player.number)" : "—")
+                            Text(vm.jerseyText(for: player))
                                 .font(.system(size: 22, weight: .bold, design: .monospaced))
                                 .foregroundStyle(.white)
                             Text(player.name.components(separatedBy: " ").last ?? player.name)
@@ -1683,7 +1677,7 @@ private struct EventEditSheet: View {
                         Button {
                             selectedAssist1 = player
                         } label: {
-                            Text(player.number > 0 ? "#\(player.number)" : "—")
+                            Text(vm.displayNumber(for: player))
                                 .font(.system(size: 14, weight: .bold, design: .monospaced))
                                 .foregroundStyle(.white)
                                 .frame(width: 50, height: 36)
@@ -1715,7 +1709,7 @@ private struct EventEditSheet: View {
                         Button {
                             selectedAssist2 = player
                         } label: {
-                            Text(player.number > 0 ? "#\(player.number)" : "—")
+                            Text(vm.displayNumber(for: player))
                                 .font(.system(size: 14, weight: .bold, design: .monospaced))
                                 .foregroundStyle(.white)
                                 .frame(width: 50, height: 36)
@@ -1798,7 +1792,7 @@ private struct BenchPickerSheet: View {
                             onDone()
                         } label: {
                             VStack(spacing: 2) {
-                                Text(player.number > 0 ? "\(player.number)" : "—")
+                                Text(vm.jerseyText(for: player))
                                     .font(.system(size: 24, weight: .bold, design: .monospaced))
                                     .foregroundStyle(.white)
                                 Text(player.lastName)
@@ -1809,7 +1803,7 @@ private struct BenchPickerSheet: View {
                             .frame(maxWidth: .infinity)
                             .frame(height: 60)
                             .background(
-                                vm.isForwardPosition(player.position) ? AppTheme.pink : AppTheme.teal,
+                                vm.isForwardForGame(player) ? AppTheme.pink : AppTheme.teal,
                                 in: RoundedRectangle(cornerRadius: 10)
                             )
                         }
@@ -1867,7 +1861,7 @@ private struct OnIceManagerSheet: View {
                         } label: {
                             let isOnIce = vm.onIcePlayers.contains(player.persistentModelID)
                             VStack(spacing: 2) {
-                                Text(player.number > 0 ? "\(player.number)" : "—")
+                                Text(vm.jerseyText(for: player))
                                     .font(.system(size: 24, weight: .bold, design: .monospaced))
                                     .foregroundStyle(.white)
                                 Text(player.lastName)
@@ -1879,7 +1873,7 @@ private struct OnIceManagerSheet: View {
                             .frame(height: 60)
                             .background(
                                 isOnIce
-                                    ? (vm.isForwardPosition(player.position) ? AppTheme.pink : AppTheme.teal)
+                                    ? (vm.isForwardForGame(player) ? AppTheme.pink : AppTheme.teal)
                                     : Color(.systemGray4),
                                 in: RoundedRectangle(cornerRadius: 10)
                             )

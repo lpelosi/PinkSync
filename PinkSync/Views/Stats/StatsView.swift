@@ -65,7 +65,7 @@ struct StatsView: View {
 
     private func skaterRow(_ player: Player) -> some View {
         HStack(spacing: 0) {
-            Text(player.number > 0 ? "\(player.number)" : "--")
+            Text(player.jerseyText)
                 .frame(width: 30, alignment: .leading)
             Text(player.name)
                 .lineLimit(1)
@@ -104,7 +104,7 @@ struct StatsView: View {
 
     private func goalieRow(_ player: Player) -> some View {
         HStack(spacing: 0) {
-            Text(player.number > 0 ? "\(player.number)" : "--")
+            Text(player.jerseyText)
                 .frame(width: 30, alignment: .leading)
             Text(player.name)
                 .lineLimit(1)

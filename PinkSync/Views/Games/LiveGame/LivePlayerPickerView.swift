@@ -8,21 +8,19 @@ struct LivePlayerPickerView: View {
     let excluded: Set<PersistentIdentifier>
     let onPick: (Player?) -> Void
     var benchPlayers: [Player] = []
+    var jerseyText: (Player) -> String = { $0.jerseyText }
 
     @Environment(\.dismiss) private var dismiss
     @State private var showAll = false
 
     private var availablePlayers: [Player] {
-        players
-            .filter { !excluded.contains($0.persistentModelID) }
-            .sorted { $0.number < $1.number }
+        players.filter { !excluded.contains($0.persistentModelID) }
     }
 
     private var availableBench: [Player] {
         benchPlayers
             .filter { !excluded.contains($0.persistentModelID) }
             .filter { p in !players.contains(where: { $0.persistentModelID == p.persistentModelID }) }
-            .sorted { $0.number < $1.number }
     }
 
     private let columns = [GridItem(.adaptive(minimum: 80), spacing: 12)]
@@ -96,7 +94,7 @@ struct LivePlayerPickerView: View {
             dismiss()
         } label: {
             VStack(spacing: 4) {
-                Text(player.number > 0 ? "\(player.number)" : "—")
+                Text(jerseyText(player))
                     .font(.system(size: 28, weight: .bold, design: .monospaced))
                     .foregroundStyle(.white)
                 Text(player.lastName)

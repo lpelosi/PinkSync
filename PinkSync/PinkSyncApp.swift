@@ -5,20 +5,23 @@ import SwiftData
 struct PinkSyncApp: App {
     @State private var container: ModelContainer?
     @State private var authManager = AuthManager()
+    @State private var syncManager: SyncManager?
     @State private var containerError: String?
+    @Environment(\.scenePhase) private var scenePhase
 
     var body: some Scene {
         WindowGroup {
             Group {
                 if let containerError {
                     ErrorView(message: containerError)
-                } else if let container {
+                } else if let container, let syncManager {
                     if authManager.isLoading {
                         LaunchView()
                     } else if authManager.isAuthenticated {
                         MainTabView()
                             .modelContainer(container)
                             .environment(authManager)
+                            .environment(syncManager)
                     } else {
                         LoginView()
                             .environment(authManager)
@@ -40,10 +43,16 @@ struct PinkSyncApp: App {
                                 )
                                 APIClient.authManager = authManager
                                 container = c
+                                syncManager = SyncManager(container: c)
                             } catch {
                                 containerError = error.localizedDescription
                             }
                         }
+                }
+            }
+            .onChange(of: scenePhase) { _, newPhase in
+                if newPhase == .active, let syncManager {
+                    Task { await syncManager.retryNow() }
                 }
             }
         }

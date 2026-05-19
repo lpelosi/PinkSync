@@ -16,6 +16,13 @@ final class Game {
     var isComplete: Bool
     var isSynced: Bool
 
+    /// True when a Save & Send attempt failed and is awaiting automatic retry.
+    /// Default false allows lightweight SwiftData migration for existing games.
+    var pendingSync: Bool = false
+
+    /// Last sync error message (shown to admins), if any.
+    var lastSyncError: String? = nil
+
     var team: Team?
     var startingGoalie: Player?
 

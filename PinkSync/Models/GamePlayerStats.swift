@@ -19,6 +19,11 @@ final class GamePlayerStats {
     var timeOnIce: Int = 0
     var plusMinus: Int = 0
 
+    /// Per-game jersey number override. Nil means "use the player's roster number."
+    /// Used when a player wears a different jersey for this game only, or when a
+    /// substitute player is assigned a borrowed number for the night.
+    var gameJerseyNumber: Int? = nil
+
     var player: Player?
     var game: Game?
 
@@ -62,6 +67,23 @@ final class GamePlayerStats {
     var hasRecordedStats: Bool {
         shots > 0 || goals > 0 || assists > 0 || hits > 0 || blocks > 0 ||
         penaltyMinutes > 0 || faceoffWins > 0 || faceoffLosses > 0 || timeOnIce > 0
+    }
+
+    /// The jersey number to display for this player on this game.
+    /// Returns the override if set, else the player's roster number.
+    /// Subs with no override get -1 (sentinel) so callers can render "—".
+    var effectiveJerseyNumber: Int {
+        if let override = gameJerseyNumber { return override }
+        guard let player else { return -1 }
+        if player.isSubstitute { return -1 }
+        return player.number
+    }
+
+    var effectiveJerseyText: String {
+        let n = effectiveJerseyNumber
+        if n < 0 { return "—" }
+        if n == 0 { return "00" }
+        return "\(n)"
     }
 
     var points: Int { goals + assists }

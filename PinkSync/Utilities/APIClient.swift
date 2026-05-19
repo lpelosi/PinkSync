@@ -310,10 +310,13 @@ enum APIClient {
         let type: String
         let period: Int
         let clockTime: String
+        let playerId: String?
         let playerName: String
         let playerNumber: Int
+        let assist1Id: String?
         let assist1Name: String?
         let assist1Number: Int?
+        let assist2Id: String?
         let assist2Name: String?
         let assist2Number: Int?
         let penaltyMinutes: Int?
@@ -489,10 +492,13 @@ enum APIClient {
                 type: event.type,
                 period: event.period,
                 clockTime: event.clockTime,
+                playerId: event.playerId.isEmpty ? nil : event.playerId,
                 playerName: event.playerName,
                 playerNumber: event.playerNumber,
+                assist1Id: event.assist1Id.isEmpty ? nil : event.assist1Id,
                 assist1Name: event.assist1Name.isEmpty ? nil : event.assist1Name,
                 assist1Number: event.assist1Number == 0 ? nil : event.assist1Number,
+                assist2Id: event.assist2Id.isEmpty ? nil : event.assist2Id,
                 assist2Name: event.assist2Name.isEmpty ? nil : event.assist2Name,
                 assist2Number: event.assist2Number == 0 ? nil : event.assist2Number,
                 penaltyMinutes: event.penaltyMinutes == 0 ? nil : event.penaltyMinutes,
@@ -592,6 +598,7 @@ enum APIClient {
         let position: String
         let isGoalie: Bool
         let isActive: Bool
+        let isSubstitute: Bool?
         let photo: String?
     }
 
@@ -602,6 +609,7 @@ enum APIClient {
         let position: String
         let isGoalie: Bool
         let isActive: Bool
+        let isSubstitute: Bool
         let photo: String?
     }
 
@@ -635,6 +643,7 @@ enum APIClient {
                 position: player.position,
                 isGoalie: player.isGoalie,
                 isActive: player.isActive,
+                isSubstitute: player.isSubstitute,
                 photo: player.photoPath
             )
         }
@@ -763,6 +772,13 @@ enum APIClient {
         let playerNumber: Int
     }
 
+    struct ShiftResponse: Decodable {
+        let period: Int
+        let duration: Int
+        let startClockTime: String?
+        let endClockTime: String?
+    }
+
     struct GamePlayerStatResponse: Decodable {
         let playerId: String?
         let playerName: String
@@ -774,6 +790,16 @@ enum APIClient {
         let hits: Int?
         let blocks: Int?
         let penaltyMinutes: Int?
+        let powerPlayGoals: Int?
+        let shortHandedGoals: Int?
+        let powerPlayAssists: Int?
+        let shortHandedAssists: Int?
+        let gameWinningGoals: Int?
+        let faceoffWins: Int?
+        let faceoffLosses: Int?
+        let timeOnIce: Int?
+        let plusMinus: Int?
+        let shifts: [ShiftResponse]?
     }
 
     struct ShootoutRoundResponse: Decodable {
