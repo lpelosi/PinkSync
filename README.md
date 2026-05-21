@@ -73,6 +73,7 @@ PinkSync/
 │   │   ├── ShootoutView.swift      # Round-by-round shootout tracker
 │   │   ├── GameSummaryView.swift   # Full game summary with per-period breakdown
 │   │   ├── GameStatsEditorView.swift # Manual stat editing
+│   │   ├── GameEventEditorView.swift # Edit an individual play (player/assists/time/type)
 │   │   ├── MvpVoteView.swift       # Admin MVP voting (open/close/live tallies)
 │   │   └── ScheduleFormView.swift  # Schedule bout creation
 │   │   └── LiveGame/               # Real-time stat tracking
@@ -92,14 +93,16 @@ PinkSync/
 ├── Utilities/
 │   ├── APIClient.swift      # HTTP client for backend communication
 │   ├── AuthManager.swift    # JWT auth + role-based access control
+│   ├── SyncManager.swift    # Background retry of failed sends + network reachability
 │   ├── PhotoCache.swift     # Two-tier (memory + disk) player photo cache
 │   ├── RosterSeeder.swift   # Seeds roster + opponent teams on first launch
 │   ├── KeychainHelper.swift # Secure token storage
-│   ├── Secrets.swift        # API key + base URL (gitignored)
-│   └── Secrets.example.swift # Template for Secrets.swift (committed)
+│   └── Secrets.swift        # API key + base URL (gitignored)
 ├── Assets.xcassets/         # App icon, team logo, opponent logos (7 teams)
 └── PinkSyncApp.swift        # App entry point with SwiftData container
 ```
+
+`Secrets.example.swift` lives at the repo root (committed) and is copied into `PinkSync/Utilities/Secrets.swift` during setup.
 
 ## App Features
 
@@ -162,6 +165,14 @@ PinkSync/
 
 ### Data Persistence
 All data is stored locally using SwiftData. The app works fully offline — syncing to the website is triggered manually via "Save & Send."
+
+### Background Sync & Offline Resilience
+- `SyncManager` watches network reachability with `NWPathMonitor` and surfaces an online/offline indicator
+- Games whose `Save & Send` fails are marked `pendingSync` and retried automatically:
+  - Every 60 seconds while online
+  - As soon as the device comes back online after losing connectivity
+  - When the app returns to the foreground (`scenePhase` change to `.active`)
+- The pending-send count is exposed for UI indicators; the last sync error is stored per game for display
 
 ### Server-side Backups
 The backend automatically backs up `games.json`, `schedule.json`, and `roster.json` to `data/backups/` before every write, keeping the 20 most recent copies per file.
