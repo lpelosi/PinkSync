@@ -452,6 +452,7 @@ enum EventStatAdjuster {
                     if event.isShortHanded { s.shortHandedAssists += sign }
                 }
             }
+            adjustPlusMinusForOnIce(event: event, game: game, sign: sign, isForUs: true)
         case "shot":
             adjustPlayer(game: game, id: event.playerId, name: event.playerName, number: event.playerNumber) { $0.shots += sign }
         case "hit":
@@ -473,6 +474,7 @@ enum EventStatAdjuster {
                 $0.shotsAgainst += sign
                 $0.goalsAgainst += sign
             }
+            adjustPlusMinusForOnIce(event: event, game: game, sign: sign, isForUs: false)
         default:
             break
         }
@@ -494,5 +496,27 @@ enum EventStatAdjuster {
     private static func adjustGoalie(game: Game, _ change: (GameGoalieStats) -> Void) {
         guard let stat = game.goalieStats.first else { return }
         change(stat)
+    }
+
+    /// Adjust +/- for the on-ice skaters captured on a goal event. PP goals don't affect +/-.
+    /// The goalie is excluded by matching against any player tied to the game's goalieStats records.
+    private static func adjustPlusMinusForOnIce(event: GameEvent, game: Game, sign: Int, isForUs: Bool) {
+        guard !event.isPowerPlay else { return }
+        guard !event.onIcePlayerIds.isEmpty else { return }
+
+        let onIceIds = event.onIcePlayerIds
+            .split(separator: ",")
+            .map { String($0).trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }
+        guard !onIceIds.isEmpty else { return }
+
+        let goalieIds = Set(game.goalieStats.compactMap { $0.player?.playerId }.filter { !$0.isEmpty })
+        let delta = isForUs ? sign : -sign
+
+        for id in onIceIds where !goalieIds.contains(id) {
+            if let stat = game.playerStats.first(where: { $0.player?.playerId == id }) {
+                stat.plusMinus += delta
+            }
+        }
     }
 }

@@ -428,12 +428,6 @@ struct GamesListView: View {
         playerById: [String: Player],
         playerByNumber: [Int: Player]
     ) {
-        let unchanged = local.goalsFor == remote.goalsFor
-            && local.goalsAgainst == remote.goalsAgainst
-            && local.result == remote.result
-            && local.opponent == remote.opponent
-            && local.playerStats.count == (remote.playerStats ?? []).count
-
         local.date = dateFormatter.date(from: remote.date) ?? local.date
         local.opponent = remote.opponent
         local.location = remote.location ?? ""
@@ -449,8 +443,10 @@ struct GamesListView: View {
             local.startingGoalie = findPlayer(sg.playerId, number: sg.playerNumber, playerById: playerById, playerByNumber: playerByNumber)
         }
 
-        guard !unchanged else { return }
-
+        // Always re-hydrate player/goalie stats from the server. The previous
+        // "unchanged" heuristic skipped re-hydration when score/result/opponent and
+        // playerStats.count matched — which left mutations like +/- updates stranded
+        // on the originating device.
         // Replace player stats (delete old, insert new)
         for oldStat in local.playerStats {
             modelContext.delete(oldStat)
