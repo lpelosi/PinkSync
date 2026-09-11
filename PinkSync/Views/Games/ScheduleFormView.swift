@@ -8,6 +8,7 @@ struct ScheduleFormView: View {
     @State private var date = Date()
     @State private var time = ""
     @State private var location = ""
+    @State private var isHome = true
     @State private var opponent = ""
     @State private var selectedTeamID: PersistentIdentifier?
     @State private var useCustomOpponent = false
@@ -31,6 +32,11 @@ struct ScheduleFormView: View {
                 DatePicker("Date", selection: $date, displayedComponents: .date)
                 TextField("Time (e.g. 9:00 PM)", text: $time)
                 TextField("Location", text: $location)
+                Picker("Venue", selection: $isHome) {
+                    Text("Home").tag(true)
+                    Text("Away").tag(false)
+                }
+                .pickerStyle(.segmented)
             }
 
             Section("Opponent") {
@@ -144,7 +150,8 @@ struct ScheduleFormView: View {
                 date: dateString,
                 opponent: resolvedOpponent,
                 location: location,
-                time: time
+                time: time,
+                isHome: isHome
             )
             onSaved?(entry)
             await MainActor.run { dismiss() }

@@ -22,6 +22,12 @@ final class Player {
     /// Optional with nil default for lightweight SwiftData migration.
     var photoPath: String? = nil
 
+    /// Season ids this player was on the team for, mirroring the server's
+    /// `seasons` field. Nil means no membership has been set on the server,
+    /// which the server treats as "every season".
+    /// Optional with nil default for lightweight SwiftData migration.
+    var seasonIds: [String]? = nil
+
     /// Full URL for the player photo, constructed from the server base URL.
     var photoURL: URL? {
         guard let photoPath else { return nil }
@@ -47,6 +53,15 @@ final class Player {
         self.isActive = isActive
     }
 
+    // MARK: - Seasons
+
+    /// Whether this player was on the roster for a season. Matches the
+    /// server's `playerInSeason`: no membership set means every season.
+    func isMember(of seasonId: String) -> Bool {
+        guard let seasonIds else { return true }
+        return seasonIds.contains(seasonId)
+    }
+
     // MARK: - Display
 
     var displayNumber: String {
@@ -68,65 +83,49 @@ final class Player {
         name.components(separatedBy: " ").last ?? name
     }
 
-    // MARK: - Skater Aggregates
+    // MARK: - Aggregates
 
-    var gamesPlayed: Int { gameStats.count + goalieGameStats.count }
-    var totalShots: Int { gameStats.reduce(0) { $0 + $1.shots } }
-    var totalGoals: Int { gameStats.reduce(0) { $0 + $1.goals } }
-    var totalAssists: Int { gameStats.reduce(0) { $0 + $1.assists } }
-    var totalPoints: Int { totalGoals + totalAssists }
-    var totalHits: Int { gameStats.reduce(0) { $0 + $1.hits } }
-    var totalBlocks: Int { gameStats.reduce(0) { $0 + $1.blocks } }
-    var totalPenaltyMinutes: Int { gameStats.reduce(0) { $0 + $1.penaltyMinutes } }
-    var totalPowerPlayGoals: Int { gameStats.reduce(0) { $0 + $1.powerPlayGoals } }
-    var totalShortHandedGoals: Int { gameStats.reduce(0) { $0 + $1.shortHandedGoals } }
-    var totalPowerPlayAssists: Int { gameStats.reduce(0) { $0 + $1.powerPlayAssists } }
-    var totalShortHandedAssists: Int { gameStats.reduce(0) { $0 + $1.shortHandedAssists } }
-    var totalGameWinningGoals: Int { gameStats.reduce(0) { $0 + $1.gameWinningGoals } }
-    var totalFaceoffWins: Int { gameStats.reduce(0) { $0 + $1.faceoffWins } }
-    var totalFaceoffLosses: Int { gameStats.reduce(0) { $0 + $1.faceoffLosses } }
-    var faceoffPercentage: Double {
-        let total = totalFaceoffWins + totalFaceoffLosses
-        guard total > 0 else { return 0 }
-        return Double(totalFaceoffWins) / Double(total) * 100
-    }
-    var totalPlusMinus: Int { gameStats.reduce(0) { $0 + $1.plusMinus } }
-    var totalTimeOnIce: Int { gameStats.reduce(0) { $0 + $1.timeOnIce } }
-    var averageTimeOnIce: Double {
-        let gamesWithTOI = gameStats.filter { $0.timeOnIce > 0 }
-        guard !gamesWithTOI.isEmpty else { return 0 }
-        return Double(gamesWithTOI.reduce(0) { $0 + $1.timeOnIce }) / Double(gamesWithTOI.count)
+    /// Every game this player has a stat line in, across all seasons.
+    var allTime: PlayerTotals {
+        PlayerTotals(skater: gameStats, goalie: goalieGameStats)
     }
 
-    // MARK: - Goalie Aggregates
-
-    var totalShotsAgainst: Int { goalieGameStats.reduce(0) { $0 + $1.shotsAgainst } }
-    var totalGoalsAgainst: Int { goalieGameStats.reduce(0) { $0 + $1.goalsAgainst } }
-
-    var goalsAgainstAverage: Double {
-        let games = goalieGameStats.count
-        guard games > 0 else { return 0.0 }
-        return Double(totalGoalsAgainst) / Double(games)
+    /// Totals over the games a scope includes: one season, regular season or
+    /// playoffs only, or any combination.
+    func totals(in scope: StatScope) -> PlayerTotals {
+        PlayerTotals(
+            skater: gameStats.filter { scope.includes($0.game) },
+            goalie: goalieGameStats.filter { scope.includes($0.game) }
+        )
     }
 
-    var savePercentage: Double {
-        guard totalShotsAgainst > 0 else { return 0.0 }
-        return Double(totalShotsAgainst - totalGoalsAgainst) / Double(totalShotsAgainst)
-    }
+    // All-time shortcuts, kept so existing call sites read the same.
 
-    var wins: Int {
-        goalieGameStats.filter {
-            $0.result == GameResult.win.rawValue || $0.result == GameResult.shootoutWin.rawValue
-        }.count
-    }
+    var gamesPlayed: Int { allTime.gamesPlayed }
+    var totalShots: Int { allTime.totalShots }
+    var totalGoals: Int { allTime.totalGoals }
+    var totalAssists: Int { allTime.totalAssists }
+    var totalPoints: Int { allTime.totalPoints }
+    var totalHits: Int { allTime.totalHits }
+    var totalBlocks: Int { allTime.totalBlocks }
+    var totalPenaltyMinutes: Int { allTime.totalPenaltyMinutes }
+    var totalPowerPlayGoals: Int { allTime.totalPowerPlayGoals }
+    var totalShortHandedGoals: Int { allTime.totalShortHandedGoals }
+    var totalPowerPlayAssists: Int { allTime.totalPowerPlayAssists }
+    var totalShortHandedAssists: Int { allTime.totalShortHandedAssists }
+    var totalGameWinningGoals: Int { allTime.totalGameWinningGoals }
+    var totalFaceoffWins: Int { allTime.totalFaceoffWins }
+    var totalFaceoffLosses: Int { allTime.totalFaceoffLosses }
+    var faceoffPercentage: Double { allTime.faceoffPercentage }
+    var totalPlusMinus: Int { allTime.totalPlusMinus }
+    var totalTimeOnIce: Int { allTime.totalTimeOnIce }
+    var averageTimeOnIce: Double { allTime.averageTimeOnIce }
 
-    var losses: Int {
-        goalieGameStats.filter {
-            $0.result == GameResult.loss.rawValue || $0.result == GameResult.shootoutLoss.rawValue
-        }.count
-    }
-
-    var overtimeLosses: Int {
-        goalieGameStats.filter { $0.result == GameResult.overtimeLoss.rawValue }.count
-    }
+    var totalShotsAgainst: Int { allTime.totalShotsAgainst }
+    var totalGoalsAgainst: Int { allTime.totalGoalsAgainst }
+    var goalsAgainstAverage: Double { allTime.goalsAgainstAverage }
+    var savePercentage: Double { allTime.savePercentage }
+    var wins: Int { allTime.wins }
+    var losses: Int { allTime.losses }
+    var overtimeLosses: Int { allTime.overtimeLosses }
 }

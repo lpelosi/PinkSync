@@ -4,18 +4,35 @@ import SwiftData
 struct RosterView: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(AuthManager.self) private var authManager
+    @Environment(SeasonStore.self) private var seasonStore
     @Query(sort: \Player.number) private var players: [Player]
 
     @State private var showingAddPlayer = false
     @State private var isSyncing = false
     @State private var syncError: String?
+    @State private var seasonId: String?
+
+    private var selectedSeasonId: String {
+        seasonId ?? seasonStore.current?.id ?? Season.allId
+    }
+
+    private var seasonBinding: Binding<String> {
+        Binding(get: { selectedSeasonId }, set: { seasonId = $0 })
+    }
+
+    /// Everyone who has ever played stays in the local store; this narrows to
+    /// the season being viewed, the same way the site's roster page does.
+    private var visiblePlayers: [Player] {
+        if selectedSeasonId == Season.allId { return players }
+        return players.filter { $0.isMember(of: selectedSeasonId) }
+    }
 
     private var skaters: [Player] {
-        players.filter { !$0.isGoalie }
+        visiblePlayers.filter { !$0.isGoalie }
     }
 
     private var goalies: [Player] {
-        players.filter { $0.isGoalie }
+        visiblePlayers.filter { $0.isGoalie }
     }
 
     var body: some View {
@@ -47,6 +64,10 @@ struct RosterView: View {
                         .foregroundStyle(.orange)
                         .font(.caption)
                 }
+            }
+
+            Section {
+                SeasonPicker(seasonId: seasonBinding)
             }
 
             Section("Goalies") {
@@ -94,7 +115,9 @@ struct RosterView: View {
         syncError = nil
 
         do {
-            let serverRoster = try await APIClient.fetchRoster()
+            // Every season: past-season players are needed locally to hydrate
+            // their old games, and the season picker filters the view.
+            let serverRoster = try await APIClient.fetchRoster(season: .all)
             let serverIds = Set(serverRoster.map(\.playerId))
 
             for remote in serverRoster {
@@ -103,22 +126,24 @@ struct RosterView: View {
                     local.name = remote.name
                     local.number = remote.number
                     local.position = remote.position
-                    local.isGoalie = remote.isGoalie
+                    local.isGoalie = remote.playsGoalie
                     local.isActive = remote.isActive
                     local.isSubstitute = remote.isSubstitute ?? false
                     local.photoPath = remote.photo
+                    local.seasonIds = remote.seasons
                 } else {
                     // Create new player from server
                     let newPlayer = Player(
                         name: remote.name,
                         number: remote.number,
                         position: remote.position,
-                        isGoalie: remote.isGoalie,
+                        isGoalie: remote.playsGoalie,
                         isActive: remote.isActive
                     )
                     newPlayer.playerId = remote.playerId
                     newPlayer.isSubstitute = remote.isSubstitute ?? false
                     newPlayer.photoPath = remote.photo
+                    newPlayer.seasonIds = remote.seasons
                     // Assign to the team
                     let teamDescriptor = FetchDescriptor<Team>(
                         predicate: #Predicate { $0.name == "Frozen Flamingos" }

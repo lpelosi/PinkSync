@@ -51,6 +51,7 @@ final class SyncManager {
     /// Clear pending state after a successful send.
     func markSent(game: Game) {
         game.pendingSync = false
+        game.hasLocalEdits = false
         game.lastSyncError = nil
         try? game.modelContext?.save()
         refreshPendingCount()
@@ -77,6 +78,7 @@ final class SyncManager {
                 try await APIClient.sendGameStats(game: game)
                 game.pendingSync = false
                 game.isSynced = true
+                game.hasLocalEdits = false
                 game.lastSyncError = nil
                 try? context.save()
             } catch {

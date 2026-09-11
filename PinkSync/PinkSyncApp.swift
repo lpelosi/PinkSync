@@ -6,6 +6,7 @@ struct PinkSyncApp: App {
     @State private var container: ModelContainer?
     @State private var authManager = AuthManager()
     @State private var syncManager: SyncManager?
+    @State private var seasonStore = SeasonStore()
     @State private var containerError: String?
     @Environment(\.scenePhase) private var scenePhase
 
@@ -22,6 +23,7 @@ struct PinkSyncApp: App {
                             .modelContainer(container)
                             .environment(authManager)
                             .environment(syncManager)
+                            .environment(seasonStore)
                     } else {
                         LoginView()
                             .environment(authManager)

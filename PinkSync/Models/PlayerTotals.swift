@@ -1,0 +1,85 @@
+import Foundation
+
+/// Aggregate skater and goalie lines over a set of per-game stat rows.
+///
+/// `Player` exposes its all-time totals through this and `totals(in:)` builds
+/// one for a season or game-type scope, so the Stats tab, the player detail
+/// page and anything else quoting totals share one set of formulas.
+struct PlayerTotals {
+    let gameStats: [GamePlayerStats]
+    let goalieGameStats: [GameGoalieStats]
+
+    init(skater: [GamePlayerStats], goalie: [GameGoalieStats]) {
+        gameStats = skater
+        goalieGameStats = goalie
+    }
+
+    // MARK: - Skater
+
+    var gamesPlayed: Int { gameStats.count + goalieGameStats.count }
+    /// Games with a skater line — the Stats tab's skater GP, so a dual-role
+    /// player's nights in goal don't count as skating games.
+    var skaterGamesPlayed: Int { gameStats.count }
+    var totalShots: Int { gameStats.reduce(0) { $0 + $1.shots } }
+    var totalGoals: Int { gameStats.reduce(0) { $0 + $1.goals } }
+    var totalAssists: Int { gameStats.reduce(0) { $0 + $1.assists } }
+    var totalPoints: Int { totalGoals + totalAssists }
+    var totalHits: Int { gameStats.reduce(0) { $0 + $1.hits } }
+    var totalBlocks: Int { gameStats.reduce(0) { $0 + $1.blocks } }
+    var totalPenaltyMinutes: Int { gameStats.reduce(0) { $0 + $1.penaltyMinutes } }
+    var totalPowerPlayGoals: Int { gameStats.reduce(0) { $0 + $1.powerPlayGoals } }
+    var totalShortHandedGoals: Int { gameStats.reduce(0) { $0 + $1.shortHandedGoals } }
+    var totalPowerPlayAssists: Int { gameStats.reduce(0) { $0 + $1.powerPlayAssists } }
+    var totalShortHandedAssists: Int { gameStats.reduce(0) { $0 + $1.shortHandedAssists } }
+    var totalGameWinningGoals: Int { gameStats.reduce(0) { $0 + $1.gameWinningGoals } }
+    var totalFaceoffWins: Int { gameStats.reduce(0) { $0 + $1.faceoffWins } }
+    var totalFaceoffLosses: Int { gameStats.reduce(0) { $0 + $1.faceoffLosses } }
+    var faceoffPercentage: Double {
+        let total = totalFaceoffWins + totalFaceoffLosses
+        guard total > 0 else { return 0 }
+        return Double(totalFaceoffWins) / Double(total) * 100
+    }
+    var totalPlusMinus: Int { gameStats.reduce(0) { $0 + $1.plusMinus } }
+    var totalTimeOnIce: Int { gameStats.reduce(0) { $0 + $1.timeOnIce } }
+    var averageTimeOnIce: Double {
+        let gamesWithTOI = gameStats.filter { $0.timeOnIce > 0 }
+        guard !gamesWithTOI.isEmpty else { return 0 }
+        return Double(gamesWithTOI.reduce(0) { $0 + $1.timeOnIce }) / Double(gamesWithTOI.count)
+    }
+
+    // MARK: - Goalie
+
+    var goalieGamesPlayed: Int { goalieGameStats.count }
+    var totalShotsAgainst: Int { goalieGameStats.reduce(0) { $0 + $1.shotsAgainst } }
+    var totalGoalsAgainst: Int { goalieGameStats.reduce(0) { $0 + $1.goalsAgainst } }
+
+    var goalsAgainstAverage: Double {
+        let games = goalieGameStats.count
+        guard games > 0 else { return 0.0 }
+        return Double(totalGoalsAgainst) / Double(games)
+    }
+
+    var savePercentage: Double {
+        guard totalShotsAgainst > 0 else { return 0.0 }
+        return Double(totalShotsAgainst - totalGoalsAgainst) / Double(totalShotsAgainst)
+    }
+
+    var wins: Int {
+        goalieGameStats.filter {
+            $0.result == GameResult.win.rawValue || $0.result == GameResult.shootoutWin.rawValue
+        }.count
+    }
+
+    var losses: Int {
+        goalieGameStats.filter {
+            $0.result == GameResult.loss.rawValue || $0.result == GameResult.shootoutLoss.rawValue
+        }.count
+    }
+
+    var overtimeLosses: Int {
+        goalieGameStats.filter { $0.result == GameResult.overtimeLoss.rawValue }.count
+    }
+
+    /// True when there is anything at all to show for this scope.
+    var hasAppearances: Bool { gamesPlayed > 0 }
+}

@@ -4,6 +4,9 @@ import SwiftData
 struct LiveGameView: View {
     @Bindable var vm: LiveGameViewModel
     let onEnd: () -> Void
+    /// Leave the live screen without ending the game. Everything is saved;
+    /// the game detail screen offers Resume Live.
+    let onClose: () -> Void
 
     private enum ActiveSheet: Identifiable {
         case playerPicker
@@ -16,6 +19,7 @@ struct LiveGameView: View {
         case lineSetup
         case periodSummary
         case editEvent(Int)
+        case editShootout(UUID)
         case clockEdit
         case benchPicker
         case onIceManager
@@ -23,6 +27,7 @@ struct LiveGameView: View {
         var id: String {
             switch self {
             case .editEvent(let idx): return "editEvent_\(idx)"
+            case .editShootout(let id): return "editShootout_\(id.uuidString)"
             default: return String(describing: self)
             }
         }
@@ -36,6 +41,7 @@ struct LiveGameView: View {
     @State private var eventToDelete: Int?
     @State private var editClockMinutes = 0
     @State private var editClockSeconds = 0
+    @State private var editPeriodNumber = 1
     @State private var playerToSub: Player?
 
     var body: some View {
@@ -54,6 +60,7 @@ struct LiveGameView: View {
                     shootoutControls
                 }
 
+                goBackBar
                 eventFeed
                 undoBar
             }
@@ -141,12 +148,23 @@ struct LiveGameView: View {
                 }
                 .presentationDetents([.medium])
             case .goalAgainstTime:
-                GoalAgainstTimeSheet(clockTime: $goalAgainstClockTime, defaultPowerPlay: vm.shortHanded) { isPowerPlay in
-                    vm.recordGoalAgainst(clockTime: goalAgainstClockTime, isPowerPlay: isPowerPlay)
+                GoalAgainstTimeSheet(
+                    clockTime: $goalAgainstClockTime,
+                    defaultPowerPlay: vm.shortHanded,
+                    players: vm.skaters,
+                    initialOnIce: Set(vm.currentOnIce().skaters.map(\.persistentModelID)),
+                    jerseyText: { vm.jerseyText(for: $0) }
+                ) { isPowerPlay, onIceIds, updateLine in
+                    if updateLine { vm.applyOnIceToLive(onIceIds) }
+                    vm.recordGoalAgainst(
+                        clockTime: goalAgainstClockTime,
+                        isPowerPlay: isPowerPlay,
+                        onIce: vm.onIceSnapshot(skaterIds: onIceIds, goalie: vm.activeGoalie)
+                    )
                     goalAgainstClockTime = ""
                     activeSheet = nil
                 }
-                .presentationDetents([.medium])
+                .presentationDetents([.medium, .large])
             case .faceoffPicker:
                 FaceoffPickerSheet(vm: vm)
                     .presentationDetents([.medium])
@@ -182,12 +200,25 @@ struct LiveGameView: View {
                     showingDeleteConfirm = true
                 }
                 .presentationDetents([.medium, .large])
-            case .clockEdit:
-                ClockEditSheet(minutes: $editClockMinutes, seconds: $editClockSeconds) {
-                    vm.setClockTime(minutes: editClockMinutes, seconds: editClockSeconds)
+            case .editShootout(let id):
+                ShootoutAttemptEditSheet(vm: vm, attemptId: id) {
                     activeSheet = nil
                 }
-                .presentationDetents([.medium])
+                .presentationDetents([.medium, .large])
+            case .clockEdit:
+                ClockEditSheet(
+                    minutes: $editClockMinutes,
+                    seconds: $editClockSeconds,
+                    periodNumber: $editPeriodNumber,
+                    showPeriod: vm.period != .shootout
+                ) {
+                    vm.setClockTime(minutes: editClockMinutes, seconds: editClockSeconds)
+                    if editPeriodNumber != vm.currentPeriod {
+                        vm.setPeriod(number: editPeriodNumber)
+                    }
+                    activeSheet = nil
+                }
+                .presentationDetents([.medium, .large])
             case .benchPicker:
                 BenchPickerSheet(vm: vm, subOutPlayer: playerToSub) {
                     activeSheet = nil
@@ -242,6 +273,16 @@ struct LiveGameView: View {
         VStack(spacing: 4) {
             // Top bar: period + clock + controls
             HStack(spacing: 8) {
+                Button {
+                    vm.stopClock()
+                    onClose()
+                } label: {
+                    Image(systemName: "chevron.down.circle.fill")
+                        .font(.system(size: 22))
+                        .foregroundStyle(.secondary)
+                }
+                .accessibilityLabel("Leave live scoring (resume later)")
+
                 Text(periodDisplayLabel)
                     .font(.caption.bold())
                     .padding(.horizontal, 10)
@@ -253,6 +294,7 @@ struct LiveGameView: View {
                     Button {
                         editClockMinutes = vm.clockSeconds / 60
                         editClockSeconds = vm.clockSeconds % 60
+                        editPeriodNumber = vm.currentPeriod
                         activeSheet = .clockEdit
                     } label: {
                         Text(vm.clockDisplay)
@@ -661,6 +703,28 @@ struct LiveGameView: View {
         }
     }
 
+    // MARK: - Go Back
+
+    /// Shown right after a period change. Reverses it without touching any
+    /// recorded play — the fix for tapping "End Period" or "Overtime" too soon.
+    @ViewBuilder
+    private var goBackBar: some View {
+        if let label = vm.goBackLabel {
+            Button {
+                vm.goBack()
+            } label: {
+                Label("Go back to \(label)", systemImage: "arrow.uturn.backward.circle.fill")
+                    .font(.system(size: 13, weight: .bold))
+                    .foregroundStyle(.white)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 10)
+                    .background(.orange, in: RoundedRectangle(cornerRadius: 10))
+            }
+            .padding(.horizontal)
+            .padding(.bottom, 4)
+        }
+    }
+
     // MARK: - Shootout Controls
 
     private var shootoutControls: some View {
@@ -672,6 +736,14 @@ struct LiveGameView: View {
                 Text("SO: \(vm.ourShootoutGoals) – \(vm.theirShootoutGoals)")
                     .font(.system(.body, design: .monospaced, weight: .bold))
             }
+            .padding(.horizontal)
+
+            HStack(spacing: 6) {
+                Image(systemName: "info.circle")
+                Text(vm.isOurShootoutTurn ? "Our shot is up next. Either side can be recorded — tap any attempt in the feed to fix it." : "Their shot is up next. Either side can be recorded — tap any attempt in the feed to fix it.")
+            }
+            .font(.caption2)
+            .foregroundStyle(.secondary)
             .padding(.horizontal)
 
             HStack(spacing: 12) {
@@ -690,10 +762,9 @@ struct LiveGameView: View {
                         }
                         .frame(maxWidth: .infinity)
                         .frame(height: 60)
-                        .background(vm.isOurShootoutTurn ? AppTheme.pink : Color(.systemGray4), in: RoundedRectangle(cornerRadius: 12))
+                        .background(vm.isOurShootoutTurn ? AppTheme.pink : AppTheme.pink.opacity(0.35), in: RoundedRectangle(cornerRadius: 12))
                         .foregroundStyle(.white)
                     }
-                    .disabled(!vm.isOurShootoutTurn)
                 }
 
                 VStack(spacing: 8) {
@@ -709,10 +780,9 @@ struct LiveGameView: View {
                                 .font(.system(size: 15, weight: .bold))
                                 .frame(maxWidth: .infinity)
                                 .frame(height: 60)
-                                .background(vm.isOurShootoutTurn ? Color(.systemGray4) : Color.red, in: RoundedRectangle(cornerRadius: 12))
+                                .background(vm.isOurShootoutTurn ? Color.red.opacity(0.35) : Color.red, in: RoundedRectangle(cornerRadius: 12))
                                 .foregroundStyle(.white)
                         }
-                        .disabled(vm.isOurShootoutTurn)
 
                         Button {
                             vm.recordShootoutAttemptAgainst(isGoal: false)
@@ -721,10 +791,9 @@ struct LiveGameView: View {
                                 .font(.system(size: 15, weight: .bold))
                                 .frame(maxWidth: .infinity)
                                 .frame(height: 60)
-                                .background(vm.isOurShootoutTurn ? Color(.systemGray4) : Color.green, in: RoundedRectangle(cornerRadius: 12))
+                                .background(vm.isOurShootoutTurn ? Color.green.opacity(0.35) : Color.green, in: RoundedRectangle(cornerRadius: 12))
                                 .foregroundStyle(.white)
                         }
-                        .disabled(vm.isOurShootoutTurn)
                     }
                 }
             }
@@ -741,8 +810,13 @@ struct LiveGameView: View {
                 LazyVStack(alignment: .leading, spacing: 6) {
                     ForEach(Array(vm.events.enumerated()), id: \.element.id) { index, event in
                         Button {
-                            if event.gameEvent != nil {
-                                activeSheet = .editEvent(index)
+                            if let gameEvent = event.gameEvent {
+                                // A goalie change has nothing to edit; undo it from the bar.
+                                if gameEvent.type != "goalieChange" {
+                                    activeSheet = .editEvent(index)
+                                }
+                            } else if let attemptId = event.shootoutAttemptId {
+                                activeSheet = .editShootout(attemptId)
                             }
                         } label: {
                             HStack(spacing: 8) {
@@ -752,7 +826,7 @@ struct LiveGameView: View {
                                     .font(.system(size: 14, weight: .medium))
                                     .foregroundStyle(.primary)
                                 Spacer()
-                                if event.gameEvent != nil {
+                                if (event.gameEvent != nil && event.gameEvent?.type != "goalieChange") || event.shootoutAttemptId != nil {
                                     Image(systemName: "pencil.circle.fill")
                                         .font(.system(size: 14))
                                         .foregroundStyle(.secondary.opacity(0.4))
@@ -785,7 +859,7 @@ struct LiveGameView: View {
 
     private var undoBar: some View {
         HStack {
-            if let last = vm.events.last, last.undoClosure != nil {
+            if let last = vm.lastUndoableEvent {
                 Button {
                     vm.undoLast()
                 } label: {
@@ -841,40 +915,63 @@ struct LiveGameView: View {
 private struct GoalAgainstTimeSheet: View {
     @Binding var clockTime: String
     let defaultPowerPlay: Bool
-    let onRecord: (Bool) -> Void
+    let players: [Player]
+    let initialOnIce: Set<PersistentIdentifier>
+    let jerseyText: (Player) -> String
+    /// Power play, skaters confirmed on the ice, and whether that should
+    /// also become the line on the ice now.
+    let onRecord: (Bool, Set<PersistentIdentifier>, Bool) -> Void
     @Environment(\.dismiss) private var dismiss
     @State private var isPowerPlay = false
+    @State private var onIce: Set<PersistentIdentifier> = []
+    @State private var updateLine = true
+    @State private var loaded = false
 
     var body: some View {
         NavigationStack {
-            VStack(spacing: 16) {
-                Text("Goal Against")
-                    .font(.headline)
+            ScrollView {
+                VStack(spacing: 16) {
+                    Text("Goal Against")
+                        .font(.headline)
 
-                ClockTimeField(time: $clockTime)
+                    ClockTimeField(time: $clockTime)
 
-                Toggle(isOn: $isPowerPlay) {
-                    Label("Power Play Goal", systemImage: "bolt.fill")
-                        .font(.subheadline.bold())
-                }
-                .tint(AppTheme.teal)
-                .padding(.horizontal)
-
-                HStack(spacing: 16) {
-                    Button("Skip Time") {
-                        clockTime = ""
-                        onRecord(isPowerPlay)
+                    Toggle(isOn: $isPowerPlay) {
+                        Label("Power Play Goal", systemImage: "bolt.fill")
+                            .font(.subheadline.bold())
                     }
-                    .foregroundStyle(.secondary)
-                    Button("Record") {
-                        onRecord(isPowerPlay)
-                    }
-                    .buttonStyle(.borderedProminent)
                     .tint(AppTheme.teal)
+                    .padding(.horizontal)
+
+                    HStack(spacing: 16) {
+                        Button("Skip Time") {
+                            clockTime = ""
+                            onRecord(isPowerPlay, onIce, updateLine)
+                        }
+                        .foregroundStyle(.secondary)
+                        Button("Record") {
+                            onRecord(isPowerPlay, onIce, updateLine)
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .tint(AppTheme.teal)
+                    }
+
+                    VStack(alignment: .leading, spacing: 8) {
+                        OnIcePicker(players: players, selection: $onIce, jerseyText: jerseyText)
+                        Toggle("Also make this the line on the ice now", isOn: $updateLine)
+                            .font(.caption)
+                            .tint(AppTheme.teal)
+                    }
+                    .padding(.horizontal)
                 }
+                .padding(.vertical)
             }
-            .padding()
-            .onAppear { isPowerPlay = defaultPowerPlay }
+            .onAppear {
+                guard !loaded else { return }
+                loaded = true
+                isPowerPlay = defaultPowerPlay
+                onIce = initialOnIce
+            }
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") { dismiss() }
@@ -1236,6 +1333,12 @@ private struct PeriodSummarySheet: View {
                         .foregroundStyle(.secondary)
                 }
 
+                Text("Something off? Cancel, tap the play in the feed to fix it, then end the period again. You can also go back after continuing.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal)
+
                 Spacer()
 
                 Button {
@@ -1406,6 +1509,19 @@ private struct GoalFlowSheet: View {
                 .buttonStyle(.borderedProminent)
                 .tint(AppTheme.pink)
             }
+
+            VStack(alignment: .leading, spacing: 8) {
+                OnIcePicker(
+                    players: vm.skaters,
+                    selection: Bindable(vm).pendingOnIce,
+                    required: vm.goalFlowRequiredOnIce,
+                    jerseyText: { vm.jerseyText(for: $0) }
+                )
+                Toggle("Also make this the line on the ice now", isOn: Bindable(vm).pendingOnIceUpdatesLine)
+                    .font(.caption)
+                    .tint(AppTheme.pink)
+            }
+            .padding(.horizontal)
             Spacer()
         }
         .padding()
@@ -1467,10 +1583,24 @@ private struct EventEditSheet: View {
     @State private var faceoffWon: Bool = true
     @State private var opponentNumber: String = ""
     @State private var period: Int = 1
+    @State private var onIceIDs: Set<PersistentIdentifier> = []
 
     private var gameEvent: GameEvent? {
         guard vm.events.indices.contains(eventIndex) else { return nil }
         return vm.events[eventIndex].gameEvent
+    }
+
+    /// Everyone who can be marked on the ice: the lineup's skaters, plus
+    /// anyone recorded on for this goal who has since left the lineup.
+    private var onIcePool: [Player] {
+        let recorded = gameEvent.map { vm.recordedOnIce(for: $0).skaters } ?? []
+        let lineup = vm.skaters
+        return lineup + recorded.filter { r in !lineup.contains { $0.persistentModelID == r.persistentModelID } }
+    }
+
+    private var requiredOnIce: Set<PersistentIdentifier> {
+        guard isGoal else { return [] }
+        return Set([selectedPlayer, selectedAssist1, selectedAssist2].compactMap { $0?.persistentModelID })
     }
 
     private var eventType: String {
@@ -1554,6 +1684,16 @@ private struct EventEditSheet: View {
                                 .font(.subheadline.bold())
                         }
                         .tint(AppTheme.teal)
+                        .padding(.horizontal)
+                    }
+
+                    if isGoal || isGoalAgainst {
+                        OnIcePicker(
+                            players: onIcePool,
+                            selection: $onIceIDs,
+                            required: requiredOnIce,
+                            jerseyText: { vm.jerseyText(for: $0) }
+                        )
                         .padding(.horizontal)
                     }
 
@@ -1736,6 +1876,8 @@ private struct EventEditSheet: View {
             selectedPenaltyType = pType
         }
 
+        onIceIDs = Set(vm.recordedOnIce(for: event).skaters.map(\.persistentModelID))
+
         selectedPlayer = vm.findPlayer(named: event.playerName, number: event.playerNumber)
 
         if !event.assist1Name.isEmpty {
@@ -1747,6 +1889,10 @@ private struct EventEditSheet: View {
     }
 
     private func saveEdits() {
+        let chosenOnIce = onIceIDs.union(requiredOnIce)
+        let onIce = (isGoal || isGoalAgainst)
+            ? onIcePool.filter { chosenOnIce.contains($0.persistentModelID) }
+            : nil
         vm.replaceEvent(
             at: eventIndex,
             player: selectedPlayer,
@@ -1758,7 +1904,8 @@ private struct EventEditSheet: View {
             penaltyType: (isPenalty || isPenaltyAgainst) ? selectedPenaltyType : nil,
             faceoffWon: isFaceoff ? faceoffWon : nil,
             opponentNumber: opponentNumber,
-            period: period
+            period: period,
+            onIce: onIce
         )
         onSave()
     }
@@ -1886,8 +2033,10 @@ private struct OnIceManagerSheet: View {
                     }
                 }
                 .padding()
+
+                lineupSections
             }
-            .navigationTitle("Manage On Ice")
+            .navigationTitle("Lineup & On Ice")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
@@ -1898,6 +2047,182 @@ private struct OnIceManagerSheet: View {
         }
     }
 
+    /// Mid-game lineup fixes: relief goalie, late arrival, someone checked in
+    /// by mistake.
+    private var lineupSections: some View {
+        VStack(alignment: .leading, spacing: 20) {
+            VStack(alignment: .leading, spacing: 8) {
+                Text("IN GOAL")
+                    .font(AppTheme.statLabel)
+                    .foregroundStyle(.secondary)
+                if let goalie = vm.activeGoalie {
+                    Text("\(vm.displayNumber(for: goalie)) \(goalie.name)")
+                        .font(.headline)
+                }
+                if vm.goalieCandidates.isEmpty {
+                    Text("No other goalie on the roster.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } else {
+                    ForEach(vm.goalieCandidates) { goalie in
+                        Button {
+                            vm.changeGoalie(to: goalie)
+                        } label: {
+                            Label("Put \(vm.displayNumber(for: goalie)) \(goalie.name) in goal", systemImage: "arrow.left.arrow.right")
+                                .font(.subheadline.weight(.semibold))
+                        }
+                        .foregroundStyle(AppTheme.pink)
+                    }
+                }
+            }
+
+            VStack(alignment: .leading, spacing: 8) {
+                Text("ADD TO LINEUP")
+                    .font(AppTheme.statLabel)
+                    .foregroundStyle(.secondary)
+                if vm.lineupCandidates.isEmpty {
+                    Text("Everyone eligible is already in the lineup.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } else {
+                    ForEach(vm.lineupCandidates) { player in
+                        Button {
+                            vm.addToLineup(player)
+                        } label: {
+                            Label("\(vm.displayNumber(for: player)) \(player.name)", systemImage: "plus.circle.fill")
+                                .font(.subheadline.weight(.semibold))
+                        }
+                        .foregroundStyle(AppTheme.teal)
+                    }
+                }
+            }
+
+            let removable = vm.skaters.filter { vm.canRemoveFromLineup($0) }
+            if !removable.isEmpty {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("REMOVE FROM LINEUP")
+                        .font(AppTheme.statLabel)
+                        .foregroundStyle(.secondary)
+                    Text("Only players with nothing recorded yet.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    ForEach(removable) { player in
+                        Button(role: .destructive) {
+                            vm.removeFromLineup(player)
+                        } label: {
+                            Label("\(vm.displayNumber(for: player)) \(player.name)", systemImage: "minus.circle")
+                                .font(.subheadline.weight(.semibold))
+                        }
+                    }
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal)
+        .padding(.bottom, 24)
+    }
+}
+
+// MARK: - Shootout Attempt Edit Sheet
+
+/// Fix a shootout attempt after the fact: shooter, goal or miss/save, or
+/// remove it entirely. Score, round numbers and whose turn it is follow.
+private struct ShootoutAttemptEditSheet: View {
+    @Bindable var vm: LiveGameViewModel
+    let attemptId: UUID
+    let onDone: () -> Void
+    @Environment(\.dismiss) private var dismiss
+
+    @State private var isGoal = false
+    @State private var shooterID: PersistentIdentifier?
+    @State private var loaded = false
+    @State private var showingDeleteConfirm = false
+
+    private var attempt: ShootoutAttempt? { vm.shootoutAttempt(id: attemptId) }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                if let attempt {
+                    Section {
+                        LabeledContent("Round", value: "\(attempt.roundNumber)")
+                        LabeledContent("Side", value: attempt.isOurs ? "Our shot" : "Their shot")
+                    }
+
+                    Section("Result") {
+                        Picker("Result", selection: $isGoal) {
+                            Text("Goal").tag(true)
+                            Text(attempt.isOurs ? "Miss" : "Save").tag(false)
+                        }
+                        .pickerStyle(.segmented)
+                    }
+
+                    if attempt.isOurs {
+                        Section("Shooter") {
+                            ForEach(vm.skaters) { player in
+                                Button {
+                                    shooterID = player.persistentModelID
+                                } label: {
+                                    HStack {
+                                        Text(vm.displayNumber(for: player))
+                                            .font(.system(.body, design: .monospaced, weight: .bold))
+                                            .foregroundStyle(AppTheme.pink)
+                                            .frame(width: 44, alignment: .leading)
+                                        Text(player.name)
+                                            .foregroundStyle(.primary)
+                                        Spacer()
+                                        if shooterID == player.persistentModelID {
+                                            Image(systemName: "checkmark.circle.fill")
+                                                .foregroundStyle(AppTheme.pink)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    Section {
+                        Button("Remove This Attempt", role: .destructive) {
+                            showingDeleteConfirm = true
+                        }
+                    }
+                } else {
+                    Text("This attempt is no longer in the shootout.")
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .navigationTitle("Edit Shootout Attempt")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Save") {
+                        let shooter = vm.skaters.first { $0.persistentModelID == shooterID }
+                        vm.updateShootoutAttempt(id: attemptId, player: shooter, isGoal: isGoal)
+                        onDone()
+                    }
+                    .disabled(attempt == nil)
+                }
+            }
+            .alert("Remove Attempt?", isPresented: $showingDeleteConfirm) {
+                Button("Cancel", role: .cancel) {}
+                Button("Remove", role: .destructive) {
+                    vm.removeShootoutAttempt(id: attemptId, removeEvent: true)
+                    onDone()
+                }
+            } message: {
+                Text("The score and round numbers will be recalculated.")
+            }
+            .onAppear {
+                guard !loaded, let attempt else { return }
+                loaded = true
+                isGoal = attempt.isGoal
+                shooterID = attempt.player?.persistentModelID
+            }
+        }
+    }
 }
 
 // MARK: - Clock Edit Sheet
@@ -1905,6 +2230,8 @@ private struct OnIceManagerSheet: View {
 private struct ClockEditSheet: View {
     @Binding var minutes: Int
     @Binding var seconds: Int
+    @Binding var periodNumber: Int
+    let showPeriod: Bool
     let onSet: () -> Void
     @Environment(\.dismiss) private var dismiss
 
@@ -1913,6 +2240,22 @@ private struct ClockEditSheet: View {
             VStack(spacing: 16) {
                 Text("Edit Clock")
                     .font(.title2.bold())
+
+                if showPeriod {
+                    VStack(spacing: 6) {
+                        Picker("Period", selection: $periodNumber) {
+                            Text("1st").tag(1)
+                            Text("2nd").tag(2)
+                            Text("3rd").tag(3)
+                            Text("OT").tag(4)
+                        }
+                        .pickerStyle(.segmented)
+                        Text("Changing the period here keeps every recorded play as is.")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                    .padding(.horizontal)
+                }
 
                 HStack(spacing: 0) {
                     Picker("Minutes", selection: $minutes) {

@@ -7,6 +7,7 @@ struct GameDetailView: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(AuthManager.self) private var authManager
     @Environment(SyncManager.self) private var syncManager
+    @Environment(SeasonStore.self) private var seasonStore
     @Query(sort: \Player.number) private var allPlayers: [Player]
     @Query private var savedTeams: [OpponentTeam]
 
@@ -29,9 +30,26 @@ struct GameDetailView: View {
     @State private var showingLineupPicker = false
     @State private var showingMvpVote = false
     @State private var showingEventEditor = false
+    @State private var hasLiveSession = false
+    @State private var showingReopenConfirm = false
 
     private var goalies: [Player] {
         allPlayers.filter { $0.isGoalie }
+    }
+
+    /// Roster players who can be in this game's lineup: active members of the
+    /// game's season, plus anyone already recorded in this game — a player
+    /// with a stat line must never be dropped from the lineup just because
+    /// their season membership says otherwise.
+    private var eligiblePlayers: [Player] {
+        let inGame = Set(
+            game.playerStats.compactMap { $0.player?.persistentModelID }
+            + game.goalieStats.compactMap { $0.player?.persistentModelID }
+            + [game.startingGoalie?.persistentModelID].compactMap { $0 }
+        )
+        return allPlayers.filter {
+            inGame.contains($0.persistentModelID) || ($0.isActive && seasonStore.isOnRoster($0, on: game.date))
+        }
     }
 
     private var lineupSkaters: [Player] {
@@ -74,10 +92,10 @@ struct GameDetailView: View {
             // MARK: - Score & Result
             Section("Score") {
                 if authManager.canManageGames {
-                    Stepper("Goals For: \(game.goalsFor)", value: $game.goalsFor, in: 0...99)
-                    Stepper("Goals Against: \(game.goalsAgainst)", value: $game.goalsAgainst, in: 0...99)
+                    Stepper("Goals For: \(game.goalsFor)", value: edited(\.goalsFor), in: 0...99)
+                    Stepper("Goals Against: \(game.goalsAgainst)", value: edited(\.goalsAgainst), in: 0...99)
 
-                    Picker("Result", selection: $game.result) {
+                    Picker("Result", selection: edited(\.result)) {
                         Text("None").tag("")
                         ForEach(GameResult.allCases) { result in
                             Text(result.displayName).tag(result.rawValue)
@@ -133,26 +151,64 @@ struct GameDetailView: View {
                 }
             }
 
-            // MARK: - Go Live
+            // MARK: - Go Live / Resume / Reopen
             if authManager.canManageGames {
-                Section {
-                    Button {
-                        if hasLineup && game.startingGoalie != nil {
-                            showingGoLiveConfirm = true
-                        } else {
-                            showingLiveCheckIn = true
+                if hasLiveSession && !game.isComplete {
+                    Section {
+                        Button {
+                            resumeLive()
+                        } label: {
+                            HStack {
+                                Spacer()
+                                Label("Resume Live", systemImage: "play.circle.fill")
+                                    .font(.headline)
+                                Spacer()
+                            }
+                            .padding(.vertical, 8)
                         }
-                    } label: {
-                        HStack {
-                            Spacer()
-                            Label("Go Live", systemImage: "record.circle")
-                                .font(.headline)
-                            Spacer()
-                        }
-                        .padding(.vertical, 8)
+                        .listRowBackground(AppTheme.teal)
+                        .foregroundStyle(.white)
+                    } footer: {
+                        Text("Picks up where live scoring left off: period, clock, penalties, lineup and the play feed.")
                     }
-                    .listRowBackground(AppTheme.teal)
-                    .foregroundStyle(.white)
+                } else if hasLiveSession && game.isComplete {
+                    Section {
+                        Button {
+                            showingReopenConfirm = true
+                        } label: {
+                            HStack {
+                                Spacer()
+                                Label("Reopen Live", systemImage: "lock.open.fill")
+                                    .font(.headline)
+                                Spacer()
+                            }
+                            .padding(.vertical, 8)
+                        }
+                        .listRowBackground(Color.orange)
+                        .foregroundStyle(.white)
+                    } footer: {
+                        Text("Ended too early, or something needs fixing in the feed? Reopen to keep scoring, then End Game again.")
+                    }
+                } else {
+                    Section {
+                        Button {
+                            if hasLineup && game.startingGoalie != nil {
+                                showingGoLiveConfirm = true
+                            } else {
+                                showingLiveCheckIn = true
+                            }
+                        } label: {
+                            HStack {
+                                Spacer()
+                                Label("Go Live", systemImage: "record.circle")
+                                    .font(.headline)
+                                Spacer()
+                            }
+                            .padding(.vertical, 8)
+                        }
+                        .listRowBackground(AppTheme.teal)
+                        .foregroundStyle(.white)
+                    }
                 }
             }
 
@@ -398,10 +454,18 @@ struct GameDetailView: View {
                 GameStatsEditorView(game: game)
             }
         }
+        .onAppear { refreshLiveSession() }
+        .alert("Reopen Game?", isPresented: $showingReopenConfirm) {
+            Button("Cancel", role: .cancel) {}
+            Button("Reopen") { reopenLive() }
+        } message: {
+            Text("The result and goalie decision are cleared and recomputed when you end the game again.\(game.isSynced ? " Use Save & Send afterwards to update the website." : "")")
+        }
         .sheet(isPresented: $showingLiveCheckIn, onDismiss: {
             if let players = pendingCheckedIn {
                 pendingCheckedIn = nil
                 let vm = LiveGameViewModel(game: game, modelContext: modelContext)
+                vm.availablePlayers = eligiblePlayers
                 vm.checkedInPlayers = players
                 vm.initializeStatsForCheckedInPlayers()
                 liveVM = vm
@@ -409,7 +473,7 @@ struct GameDetailView: View {
         }) {
             LineupCheckInView(
                 game: game,
-                allPlayers: allPlayers.filter { $0.isActive }
+                allPlayers: eligiblePlayers
             ) { checkedIn in
                 pendingCheckedIn = checkedIn
                 showingLiveCheckIn = false
@@ -426,6 +490,7 @@ struct GameDetailView: View {
                         }
                         showingGoLiveConfirm = false
                         let vm = LiveGameViewModel(game: game, modelContext: modelContext)
+                        vm.availablePlayers = eligiblePlayers
                         vm.checkedInPlayers = players
                         vm.initializeStatsForCheckedInPlayers()
                         liveVM = vm
@@ -437,11 +502,57 @@ struct GameDetailView: View {
                 )
             }
         }
-        .fullScreenCover(item: $liveVM) { vm in
-            LiveGameView(vm: vm) {
+        .fullScreenCover(item: $liveVM, onDismiss: { refreshLiveSession() }) { vm in
+            LiveGameView(vm: vm, onEnd: {
                 liveVM = nil
-            }
+            }, onClose: {
+                liveVM = nil
+            })
         }
+    }
+
+    /// A binding to a game field that also records the change as a local edit.
+    private func edited<Value>(_ keyPath: ReferenceWritableKeyPath<Game, Value>) -> Binding<Value> {
+        Binding(
+            get: { game[keyPath: keyPath] },
+            set: {
+                game[keyPath: keyPath] = $0
+                game.hasLocalEdits = true
+            }
+        )
+    }
+
+    // MARK: - Live Session
+
+    private func refreshLiveSession() {
+        hasLiveSession = LiveSessionStore.exists(gameId: game.gameId)
+    }
+
+    private func resumeLive() {
+        guard let vm = LiveGameViewModel.resume(game: game, modelContext: modelContext, lookup: allPlayers, eligible: eligiblePlayers) else {
+            discardUnreadableSession()
+            return
+        }
+        liveVM = vm
+    }
+
+    /// The saved session could not be read (e.g. written by an incompatible
+    /// build). Drop it so the game falls back to Go Live instead of a Resume
+    /// button that does nothing. Plays already recorded are in the game.
+    private func discardUnreadableSession() {
+        LiveSessionStore.delete(gameId: game.gameId)
+        refreshLiveSession()
+        sendError = "The saved live session couldn't be restored. Recorded plays are kept — use Go Live to continue, or Edit Events to fix plays."
+        showingSendError = true
+    }
+
+    private func reopenLive() {
+        guard let vm = LiveGameViewModel.resume(game: game, modelContext: modelContext, lookup: allPlayers, eligible: eligiblePlayers) else {
+            discardUnreadableSession()
+            return
+        }
+        vm.reopenAfterEnd()
+        liveVM = vm
     }
 
     // MARK: - Helpers
@@ -466,6 +577,7 @@ struct GameDetailView: View {
                 return
             }
         }
+        LiveSessionStore.delete(gameId: game.gameId)
         modelContext.delete(game)
         try? modelContext.save()
         isResetting = false
@@ -480,7 +592,9 @@ struct GameDetailView: View {
         // Ensure a goalie stat record exists for the starting goalie
         if let goalie = game.startingGoalie,
            !game.goalieStats.contains(where: { $0.player?.persistentModelID == goalie.persistentModelID }) {
-            let gs = GameGoalieStats()
+            // No decision of its own: the send picks the decision from the
+            // game result, and a default "W" here would claim a win in a loss.
+            let gs = GameGoalieStats(result: "")
             gs.player = goalie
             game.goalieStats.append(gs)
             modelContext.insert(gs)
@@ -503,6 +617,11 @@ struct GameDetailView: View {
                     await APIClient.sendTeamLogo(teamName: game.opponent, logoData: pngData)
                 }
             }
+        } catch let error as APIClient.ValidationError {
+            // Nothing a retry can fix (e.g. no result after reopening a game):
+            // tell the scorekeeper instead of queueing it forever.
+            sendError = error.localizedDescription
+            showingSendError = true
         } catch {
             syncManager.enqueue(game: game, error: error)
             sendError = "\(error.localizedDescription)\n\nWe'll keep trying in the background."
@@ -749,6 +868,7 @@ struct GameLineupPickerView: View {
             }
         }
 
+        if modelContext.hasChanges { game.hasLocalEdits = true }
         try? modelContext.save()
     }
 }
@@ -955,6 +1075,9 @@ struct GoaliePickerView: View {
         List {
             ForEach(goalies) { goalie in
                 Button {
+                    if game.startingGoalie?.persistentModelID != goalie.persistentModelID {
+                        game.hasLocalEdits = true
+                    }
                     game.startingGoalie = goalie
                     dismiss()
                 } label: {

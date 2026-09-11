@@ -106,10 +106,11 @@ struct GoalieStatsView: View {
             shotsAgainst = existing.shotsAgainst
             goalsAgainst = existing.goalsAgainst
         } else {
+            let someoneDecided = game.goalieStats.contains { !$0.result.isEmpty }
             let newStats = GameGoalieStats(
                 shotsAgainst: 0,
                 goalsAgainst: 0,
-                result: game.result
+                result: someoneDecided ? "" : game.result
             )
             newStats.player = player
             game.goalieStats.append(newStats)
@@ -121,9 +122,20 @@ struct GoalieStatsView: View {
 
     private func saveStats() {
         guard let resolvedStats else { return }
+        if resolvedStats.shotsAgainst != shotsAgainst || resolvedStats.goalsAgainst != goalsAgainst {
+            game.hasLocalEdits = true
+        }
         resolvedStats.shotsAgainst = shotsAgainst
         resolvedStats.goalsAgainst = goalsAgainst
-        resolvedStats.result = game.result
+        // Keep the line in step with a corrected game result, but only for the
+        // goalie who has the decision. With a relief goalie, the other line
+        // stays "no decision" — opening their card must not change that.
+        let otherDecided = game.goalieStats.contains {
+            $0.persistentModelID != resolvedStats.persistentModelID && !$0.result.isEmpty
+        }
+        if !resolvedStats.result.isEmpty || !otherDecided {
+            resolvedStats.result = game.result
+        }
         try? modelContext.save()
     }
 }

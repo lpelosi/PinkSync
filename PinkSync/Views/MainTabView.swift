@@ -4,6 +4,7 @@ import SwiftData
 struct MainTabView: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(AuthManager.self) private var authManager
+    @Environment(SeasonStore.self) private var seasonStore
     @State private var selectedTab = 0
 
     var body: some View {
@@ -59,6 +60,7 @@ struct MainTabView: View {
         .tint(AppTheme.pink)
         .task {
             RosterSeeder.seedIfNeeded(modelContext: modelContext)
+            await seasonStore.load()
         }
     }
 }

@@ -10,12 +10,28 @@
 		4813141B2F9E5DC400A848EF /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 4813141A2F9E5DC400A848EF /* PrivacyInfo.xcprivacy */; };
 /* End PBXBuildFile section */
 
+/* Begin PBXContainerItemProxy section */
+		7E570000000000000000A008 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 9458DA252F9AADFC00BF4C82 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 9458DA2C2F9AADFC00BF4C82;
+			remoteInfo = PinkSync;
+		};
+/* End PBXContainerItemProxy section */
+
 /* Begin PBXFileReference section */
 		4813141A2F9E5DC400A848EF /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; lastKnownFileType = text.xml; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
+		7E570000000000000000A002 /* PinkSyncTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = PinkSyncTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		9458DA2D2F9AADFC00BF4C82 /* PinkSync.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = PinkSync.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
+		7E570000000000000000A003 /* PinkSyncTests */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = PinkSyncTests;
+			sourceTree = "<group>";
+		};
 		9458DA2F2F9AADFC00BF4C82 /* PinkSync */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			path = PinkSync;
@@ -24,6 +40,13 @@
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
+		7E570000000000000000A005 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		9458DA2A2F9AADFC00BF4C82 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
@@ -38,6 +61,7 @@
 			isa = PBXGroup;
 			children = (
 				9458DA2F2F9AADFC00BF4C82 /* PinkSync */,
+				7E570000000000000000A003 /* PinkSyncTests */,
 				9458DA2E2F9AADFC00BF4C82 /* Products */,
 				4813141A2F9E5DC400A848EF /* PrivacyInfo.xcprivacy */,
 			);
@@ -47,6 +71,7 @@
 			isa = PBXGroup;
 			children = (
 				9458DA2D2F9AADFC00BF4C82 /* PinkSync.app */,
+				7E570000000000000000A002 /* PinkSyncTests.xctest */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -54,6 +79,29 @@
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
+		7E570000000000000000A001 /* PinkSyncTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 7E570000000000000000A00B /* Build configuration list for PBXNativeTarget "PinkSyncTests" */;
+			buildPhases = (
+				7E570000000000000000A004 /* Sources */,
+				7E570000000000000000A005 /* Frameworks */,
+				7E570000000000000000A006 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				7E570000000000000000A007 /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				7E570000000000000000A003 /* PinkSyncTests */,
+			);
+			name = PinkSyncTests;
+			packageProductDependencies = (
+			);
+			productName = PinkSyncTests;
+			productReference = 7E570000000000000000A002 /* PinkSyncTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
 		9458DA2C2F9AADFC00BF4C82 /* PinkSync */ = {
 			isa = PBXNativeTarget;
 			buildConfigurationList = 9458DA382F9AADFD00BF4C82 /* Build configuration list for PBXNativeTarget "PinkSync" */;
@@ -86,6 +134,10 @@
 				LastSwiftUpdateCheck = 2640;
 				LastUpgradeCheck = 2640;
 				TargetAttributes = {
+					7E570000000000000000A001 = {
+						CreatedOnToolsVersion = 26.4.1;
+						TestTargetID = 9458DA2C2F9AADFC00BF4C82;
+					};
 					9458DA2C2F9AADFC00BF4C82 = {
 						CreatedOnToolsVersion = 26.4.1;
 					};
@@ -106,11 +158,19 @@
 			projectRoot = "";
 			targets = (
 				9458DA2C2F9AADFC00BF4C82 /* PinkSync */,
+				7E570000000000000000A001 /* PinkSyncTests */,
 			);
 		};
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
+		7E570000000000000000A006 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		9458DA2B2F9AADFC00BF4C82 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -122,6 +182,13 @@
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
+		7E570000000000000000A004 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		9458DA292F9AADFC00BF4C82 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -131,7 +198,59 @@
 		};
 /* End PBXSourcesBuildPhase section */
 
+/* Begin PBXTargetDependency section */
+		7E570000000000000000A007 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 9458DA2C2F9AADFC00BF4C82 /* PinkSync */;
+			targetProxy = 7E570000000000000000A008 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
 /* Begin XCBuildConfiguration section */
+		7E570000000000000000A009 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 4W8XF8ZAGR;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 18.6;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.frozenflamingoshc.PinkSyncTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/PinkSync.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/PinkSync";
+			};
+			name = Debug;
+		};
+		7E570000000000000000A00A /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 4W8XF8ZAGR;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 18.6;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.frozenflamingoshc.PinkSyncTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/PinkSync.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/PinkSync";
+			};
+			name = Release;
+		};
 		9458DA362F9AADFD00BF4C82 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
@@ -330,6 +449,15 @@
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
+		7E570000000000000000A00B /* Build configuration list for PBXNativeTarget "PinkSyncTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				7E570000000000000000A009 /* Debug */,
+				7E570000000000000000A00A /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
 		9458DA282F9AADFC00BF4C82 /* Build configuration list for PBXProject "PinkSync" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (

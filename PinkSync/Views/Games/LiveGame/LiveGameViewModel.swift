@@ -72,12 +72,46 @@ struct ActivePenalty: Identifiable {
 }
 
 struct LiveEvent: Identifiable {
+    enum Kind {
+        /// A recorded play — shot, goal, penalty, faceoff…
+        case action
+        /// A period change. Undoing it puts the game back where it was.
+        case transition
+        /// One shootout attempt, editable after the fact.
+        case shootout
+        /// Information only ("Resumed", "Game reopened"). Never undoable and
+        /// skipped when looking for the last thing to undo or go back from.
+        case note
+    }
+
     let id = UUID()
     let timestamp = Date()
     let emoji: String
-    let description: String
+    var description: String
     let undoClosure: (() -> Void)?
     var gameEvent: GameEvent?
+    var kind: Kind = .action
+    /// For `.shootout` events, the attempt this line describes.
+    var shootoutAttemptId: UUID?
+    /// For `.transition` events, what "go back" returns to, e.g. "2nd Period".
+    var goBackLabel: String?
+    /// For `.transition` events, the state "go back" restores. Kept on the
+    /// event so it survives a save/resume of the session.
+    var transitionSnapshot: LiveTransitionSnapshot?
+}
+
+/// One shot in a shootout, ours or theirs. Kept as a list so a result or
+/// shooter can be corrected afterwards and the score, round numbers and whose
+/// turn it is are all re-derived rather than patched.
+struct ShootoutAttempt: Identifiable {
+    let id = UUID()
+    var isOurs: Bool
+    var player: Player?
+    var isGoal: Bool
+    /// Persisted for the goalie's record on opponent attempts.
+    var round: ShootoutRound?
+    /// Derived: the round this attempt belongs to.
+    var roundNumber: Int = 1
 }
 
 @Observable
@@ -96,13 +130,28 @@ final class LiveGameViewModel: Identifiable {
     var pendingSecondaryAssist: Player?
     var pendingClockTime: String = ""
     var pendingGoalStrength: Int = 0 // 0=ES, 1=PP, 2=SH
+    /// Skaters confirmed on the ice for the goal being entered. Starts as
+    /// whoever the app thinks is on; the scorekeeper can fix it before saving.
+    var pendingOnIce: Set<PersistentIdentifier> = []
+    /// Whether that correction should also become the line on the ice now.
+    var pendingOnIceUpdatesLine = true
 
     var period: GamePeriod = .regulation
     var currentPeriod: Int = 1
-    var ourShootoutGoals = 0
-    var theirShootoutGoals = 0
-    var shootoutRoundNumber = 0
-    var isOurShootoutTurn = true
+
+    // Shootout. The attempt list is the source of truth; the rest is derived
+    // by `recomputeShootout()` so edits and undos can never leave the turn or
+    // the score out of step.
+    var shootoutAttempts: [ShootoutAttempt] = []
+    private(set) var ourShootoutGoals = 0
+    private(set) var theirShootoutGoals = 0
+    /// The round the next shot belongs to.
+    private(set) var shootoutRoundNumber = 1
+    /// Whose shot is expected next. A suggestion only — either side can be
+    /// recorded at any time, since the order on the ice is not always ours-first.
+    private(set) var isOurShootoutTurn = true
+    /// The score when the shootout started; shootout goals are added on top.
+    private var goalsBeforeShootout = (for: 0, against: 0)
 
     // Quick-repeat
     var lastRecordedPlayer: Player?
@@ -140,14 +189,175 @@ final class LiveGameViewModel: Identifiable {
 
     private let haptic = UIImpactFeedbackGenerator(style: .medium)
 
+    // Live scoreboard on the website. Pushed at most every few seconds while
+    // scoring, taken down when the game ends. Off in tests.
+    var publishesLiveScore = true
+    private var livePublishingSuspended = false
+    private var livePushTask: Task<Void, Never>?
+    private var livePushPending = false
+    private static let livePushInterval: Duration = .seconds(5)
+
     init(game: Game, modelContext: ModelContext) {
         self.game = game
         self.modelContext = modelContext
         haptic.prepare()
     }
 
-    var activeGoalie: Player? {
-        game.startingGoalie
+    /// The goalie in net right now. Starts as the game's starting goalie and
+    /// changes with `changeGoalie(to:)` when a relief goalie comes in.
+    var activeGoalie: Player?
+
+    /// Roster players eligible for this game, for adding someone to the lineup
+    /// or changing goalie mid-game. Set by whoever creates the view model.
+    var availablePlayers: [Player] = []
+
+    /// Eligible players not yet in the lineup.
+    var lineupCandidates: [Player] {
+        availablePlayers
+            .filter { candidate in !checkedInPlayers.contains { $0.persistentModelID == candidate.persistentModelID } }
+            .sorted { sortKey(for: $0) < sortKey(for: $1) }
+    }
+
+    /// Goalies who could take over in net.
+    var goalieCandidates: [Player] {
+        let pool = availablePlayers + checkedInPlayers
+        var seen = Set<PersistentIdentifier>()
+        return pool.filter { player in
+            guard player.isGoalie, player.persistentModelID != activeGoalie?.persistentModelID else { return false }
+            return seen.insert(player.persistentModelID).inserted
+        }
+        .sorted { $0.number < $1.number }
+    }
+
+    // MARK: - Lineup Changes
+
+    /// Check a player in after the game has started — a late arrival, or
+    /// someone missed at check-in.
+    func addToLineup(_ player: Player, silently: Bool = false) {
+        guard !checkedInPlayers.contains(where: { $0.persistentModelID == player.persistentModelID }) else { return }
+        checkedInPlayers.append(player)
+        if player.persistentModelID != activeGoalie?.persistentModelID {
+            _ = findOrCreatePlayerStats(for: player)
+        }
+        if !silently {
+            events.append(LiveEvent(
+                emoji: "➕",
+                description: "\(playerLabel(player)) added to lineup",
+                undoClosure: { [weak self] in self?.removeFromLineup(player, silently: true) }
+            ))
+        }
+        save()
+        fire()
+    }
+
+    /// A player can leave the lineup only while nothing has been recorded for
+    /// them, so no stat silently disappears with them.
+    func canRemoveFromLineup(_ player: Player) -> Bool {
+        let id = player.persistentModelID
+        guard id != activeGoalie?.persistentModelID, !onIcePlayers.contains(id) else { return false }
+        if (playerTOI[id] ?? 0) > 0 { return false }
+        if let stats = game.playerStats.first(where: { $0.player?.persistentModelID == id }) {
+            return !stats.hasRecordedStats && stats.plusMinus == 0 && stats.shifts.isEmpty
+        }
+        return true
+    }
+
+    func removeFromLineup(_ player: Player, silently: Bool = false) {
+        guard canRemoveFromLineup(player) else { return }
+        let id = player.persistentModelID
+        checkedInPlayers.removeAll { $0.persistentModelID == id }
+        if let stats = game.playerStats.first(where: { $0.player?.persistentModelID == id }) {
+            modelContext.delete(stats)
+        }
+        playerLines.removeValue(forKey: id)
+        playerGamePosition.removeValue(forKey: id)
+        playerGameRole.removeValue(forKey: id)
+        playerTOI.removeValue(forKey: id)
+        if !silently {
+            events.append(LiveEvent(
+                emoji: "➖",
+                description: "\(playerLabel(player)) removed from lineup",
+                undoClosure: { [weak self] in self?.addToLineup(player, silently: true) }
+            ))
+        }
+        save()
+        fire()
+    }
+
+    /// Put a different goalie in net. Shots against from here on are theirs.
+    /// The previous goalie stays in the lineup. Undoable from the feed.
+    func changeGoalie(to goalie: Player) {
+        guard goalie.persistentModelID != activeGoalie?.persistentModelID else { return }
+        let previous = activeGoalie
+        let hadLine = game.goalieStats.contains { $0.player?.persistentModelID == goalie.persistentModelID }
+        applyGoalie(goalie)
+        let description = previous.map { "\(playerLabel(goalie)) in goal for \(playerLabel($0))" }
+            ?? "\(playerLabel(goalie)) in goal"
+        // Persisted so the goalie of record can be worked out at the end and
+        // after a resume: the goalie in net at any moment is the last change
+        // before it, else the starter.
+        let event = createEvent(type: "goalieChange", player: goalie)
+        events.append(LiveEvent(
+            emoji: "🥅",
+            description: description,
+            undoClosure: { [weak self] in
+                guard let self else { return }
+                if let previous { self.applyGoalie(previous) }
+                if !hadLine { self.pruneEmptyGoalieLine(for: goalie) }
+                self.removeGameEvent(event)
+            },
+            gameEvent: event
+        ))
+        save()
+        fire()
+    }
+
+    /// Drop a goalie's stat line when it holds nothing: no shots, no goals,
+    /// no shootout rounds, no decision, and they are neither the starter nor
+    /// in net now. Otherwise an accidental or undone goalie change would
+    /// credit them a game played.
+    func pruneEmptyGoalieLine(for goalie: Player) {
+        let id = goalie.persistentModelID
+        guard id != activeGoalie?.persistentModelID,
+              id != game.startingGoalie?.persistentModelID,
+              let line = game.goalieStats.first(where: { $0.player?.persistentModelID == id }),
+              line.shotsAgainst == 0, line.goalsAgainst == 0,
+              line.shootoutRounds.isEmpty, line.result.isEmpty else { return }
+        game.goalieStats.removeAll { $0.persistentModelID == line.persistentModelID }
+        modelContext.delete(line)
+    }
+
+    /// The goalie in net when `gameEvent` was recorded: the goalie stamped on
+    /// it (shots and goals against), else the last goalie change before it,
+    /// else the starter.
+    func goalieInNet(at gameEvent: GameEvent) -> Player? {
+        let pool = checkedInPlayers + availablePlayers
+        if gameEvent.type == "shotAgainst" || gameEvent.type == "goalAgainst",
+           !gameEvent.playerId.isEmpty,
+           let stamped = pool.first(where: { $0.playerId == gameEvent.playerId }) {
+            return stamped
+        }
+        let change = GameEvent.chronological(game.events)
+            .filter { $0.type == "goalieChange" && $0.createdAt < gameEvent.createdAt }
+            .last
+        if let change, let player = pool.first(where: { $0.playerId == change.playerId }) {
+            return player
+        }
+        return game.startingGoalie
+    }
+
+    private func applyGoalie(_ goalie: Player) {
+        if let old = activeGoalie {
+            onIcePlayers.remove(old.persistentModelID)
+        }
+        if !checkedInPlayers.contains(where: { $0.persistentModelID == goalie.persistentModelID }) {
+            checkedInPlayers.append(goalie)
+        }
+        activeGoalie = goalie
+        _ = findOrCreateGoalieStats(for: goalie)
+        onIcePlayers.insert(goalie.persistentModelID)
+        currentShiftSeconds.removeValue(forKey: goalie.persistentModelID)
+        shiftStartClockTime.removeValue(forKey: goalie.persistentModelID)
     }
 
     var skaters: [Player] {
@@ -282,6 +492,63 @@ final class LiveGameViewModel: Identifiable {
         playerLines.removeValue(forKey: id)
     }
 
+    /// Who was on the ice for a goal: the skaters who get +/-, and the id list
+    /// stored on the event (goalie included, as recorded live).
+    struct OnIceSnapshot {
+        var skaters: [Player]
+        var storedIds: String
+    }
+
+    /// A snapshot from a picked set of skaters, with the goalie in net added
+    /// to the stored ids the way live scoring records them.
+    func onIceSnapshot(skaterIds: Set<PersistentIdentifier>, goalie: Player?) -> OnIceSnapshot {
+        var seen = Set<PersistentIdentifier>()
+        let skaters = (checkedInPlayers + availablePlayers).filter {
+            skaterIds.contains($0.persistentModelID)
+                && $0.persistentModelID != goalie?.persistentModelID
+                && seen.insert($0.persistentModelID).inserted
+        }
+        let ids = (skaters.map(\.playerId) + [goalie?.playerId ?? ""]).filter { !$0.isEmpty }
+        return OnIceSnapshot(skaters: skaters, storedIds: ids.joined(separator: ","))
+    }
+
+    /// Make the line on the ice match a corrected set, so the next goal starts
+    /// from the right players. Shift times follow; TOI is best-effort anyway.
+    func applyOnIceToLive(_ skaterIds: Set<PersistentIdentifier>) {
+        for player in skaters {
+            let id = player.persistentModelID
+            let isOn = onIcePlayers.contains(id)
+            if skaterIds.contains(id) && !isOn {
+                putPlayerOnIce(player)
+            } else if !skaterIds.contains(id) && isOn {
+                takePlayerOffIce(player)
+            }
+        }
+    }
+
+    /// Skaters on the ice right now, excluding the goalie in net.
+    func currentOnIce() -> OnIceSnapshot {
+        let goalieId = activeGoalie?.persistentModelID
+        let skaters = checkedInPlayers.filter {
+            onIcePlayers.contains($0.persistentModelID) && $0.persistentModelID != goalieId
+        }
+        return OnIceSnapshot(skaters: skaters, storedIds: onIcePlayerIdString())
+    }
+
+    /// Who was on the ice when `gameEvent` was recorded, from its stored ids.
+    /// The goalie in net at that moment is left out of the skaters, as live
+    /// scoring did.
+    func recordedOnIce(for gameEvent: GameEvent) -> OnIceSnapshot {
+        let goalieId = goalieInNet(at: gameEvent)?.playerId
+        let pool = checkedInPlayers + availablePlayers
+        var seen = Set<String>()
+        let skaters: [Player] = gameEvent.onIcePlayerIds
+            .split(separator: ",").map(String.init)
+            .filter { $0 != goalieId && seen.insert($0).inserted }
+            .compactMap { pid in pool.first { $0.playerId == pid } }
+        return OnIceSnapshot(skaters: skaters, storedIds: gameEvent.onIcePlayerIds)
+    }
+
     func onIcePlayerIdString() -> String {
         onIcePlayers.compactMap { id in
             checkedInPlayers.first(where: { $0.persistentModelID == id })?.playerId
@@ -328,6 +595,9 @@ final class LiveGameViewModel: Identifiable {
     }
 
     func initializeStatsForCheckedInPlayers() {
+        if activeGoalie == nil {
+            activeGoalie = game.startingGoalie
+        }
         for player in skaters {
             _ = findOrCreatePlayerStats(for: player)
         }
@@ -392,11 +662,13 @@ final class LiveGameViewModel: Identifiable {
     func startClock() {
         guard clockSeconds > 0 else { return }
         clockRunning = true
+        scheduleLivePush()
         clockTask = Task { @MainActor in
             while !Task.isCancelled && clockRunning && clockSeconds > 0 {
                 try? await Task.sleep(for: .seconds(1))
                 guard !Task.isCancelled, clockRunning else { break }
                 clockSeconds -= 1
+                if clockSeconds % 15 == 0 { scheduleLivePush() }
                 for i in activePenalties.indices {
                     if activePenalties[i].remainingSeconds > 0 {
                         activePenalties[i].remainingSeconds -= 1
@@ -418,6 +690,7 @@ final class LiveGameViewModel: Identifiable {
         clockRunning = false
         clockTask?.cancel()
         clockTask = nil
+        scheduleLivePush()
     }
 
     func setClockTime(minutes: Int, seconds: Int) {
@@ -481,7 +754,63 @@ final class LiveGameViewModel: Identifiable {
     }
 
     private func save() {
+        // Anything live scoring changes is newer than the server's copy until
+        // it is sent.
+        if modelContext.hasChanges { game.hasLocalEdits = true }
         try? modelContext.save()
+        LiveSessionStore.save(exportState())
+        scheduleLivePush()
+    }
+
+    // MARK: - Live Score Publishing
+
+    private var livePeriodLabel: String {
+        switch period {
+        case .regulation: periodLabel
+        case .overtime: "OT"
+        case .shootout: "SO"
+        }
+    }
+
+    func liveScorePayload() -> APIClient.LiveScorePayload {
+        APIClient.LiveScorePayload(
+            gameId: game.gameId,
+            opponent: game.opponent,
+            date: Season.apiDay(for: game.date),
+            goalsFor: game.goalsFor,
+            goalsAgainst: game.goalsAgainst,
+            shotsFor: totalShotsFor,
+            shotsAgainst: totalShotsAgainst,
+            period: livePeriodLabel,
+            clock: isClockSetUp ? clockDisplay : "",
+            clockRunning: clockRunning
+        )
+    }
+
+    /// Coalesces pushes: the first goes out immediately, later ones wait for
+    /// the interval and send the latest state once.
+    func scheduleLivePush() {
+        guard publishesLiveScore, !livePublishingSuspended, !game.gameId.isEmpty else { return }
+        livePushPending = true
+        guard livePushTask == nil else { return }
+        livePushTask = Task { @MainActor [weak self] in
+            while let self, self.livePushPending, !self.livePublishingSuspended {
+                self.livePushPending = false
+                try? await APIClient.pushLiveScore(self.liveScorePayload())
+                try? await Task.sleep(for: Self.livePushInterval)
+            }
+            self?.livePushTask = nil
+        }
+    }
+
+    private func stopLivePublishing() {
+        livePublishingSuspended = true
+        livePushPending = false
+        livePushTask?.cancel()
+        livePushTask = nil
+        guard publishesLiveScore, !game.gameId.isEmpty else { return }
+        let gameId = game.gameId
+        Task { try? await APIClient.clearLiveScore(gameId: gameId) }
     }
 
     private func fire() {
@@ -558,7 +887,117 @@ final class LiveGameViewModel: Identifiable {
 
     // MARK: - Period Transitions
 
+    private func snapshot() -> LiveTransitionSnapshot {
+        LiveTransitionSnapshot(
+            period: period.rawValue,
+            currentPeriod: currentPeriod,
+            clockSeconds: clockSeconds,
+            goalsFor: game.goalsFor,
+            goalsAgainst: game.goalsAgainst,
+            activePenalties: activePenalties.map(Self.penaltyState)
+        )
+    }
+
+    private func restore(_ snap: LiveTransitionSnapshot) {
+        stopClock()
+        closeAllShifts()
+        period = GamePeriod(rawValue: snap.period) ?? .regulation
+        currentPeriod = snap.currentPeriod
+        clockSeconds = snap.clockSeconds
+        activePenalties = snap.activePenalties.compactMap(Self.penalty)
+        game.goalsFor = snap.goalsFor
+        game.goalsAgainst = snap.goalsAgainst
+        // Leaving a shootout that has no attempts yet (it can only be undone
+        // while it is the latest event) — nothing to tear down but the counters.
+        shootoutAttempts.removeAll()
+        recomputeShootout()
+    }
+
+    nonisolated private static func penaltyState(_ penalty: ActivePenalty) -> LiveSessionState.Penalty {
+        LiveSessionState.Penalty(
+            playerName: penalty.playerName,
+            playerNumber: penalty.playerNumber,
+            isOurs: penalty.isOurs,
+            type: penalty.type.rawValue,
+            totalSeconds: penalty.totalSeconds,
+            remainingSeconds: penalty.remainingSeconds
+        )
+    }
+
+    nonisolated private static func penalty(_ state: LiveSessionState.Penalty) -> ActivePenalty? {
+        guard let type = PenaltyType(rawValue: state.type) else { return nil }
+        return ActivePenalty(
+            playerName: state.playerName,
+            playerNumber: state.playerNumber,
+            isOurs: state.isOurs,
+            type: type,
+            totalSeconds: state.totalSeconds,
+            remainingSeconds: state.remainingSeconds
+        )
+    }
+
+    /// Label for a period the way the scoreboard shows it: "1st Period", "Overtime", "Shootout".
+    func label(for period: GamePeriod, number: Int) -> String {
+        switch period {
+        case .regulation:
+            switch number {
+            case 1: "1st Period"
+            case 2: "2nd Period"
+            case 3: "3rd Period"
+            default: "Period \(number)"
+            }
+        case .overtime: "Overtime"
+        case .shootout: "Shootout"
+        }
+    }
+
+    private func appendTransition(emoji: String, description: String, from snap: LiveTransitionSnapshot) {
+        events.append(transitionEvent(emoji: emoji, description: description, snapshot: snap))
+    }
+
+    private func transitionEvent(emoji: String, description: String, snapshot snap: LiveTransitionSnapshot) -> LiveEvent {
+        let previous = GamePeriod(rawValue: snap.period) ?? .regulation
+        return LiveEvent(
+            emoji: emoji,
+            description: description,
+            undoClosure: { [weak self] in self?.restore(snap) },
+            kind: .transition,
+            goBackLabel: label(for: previous, number: snap.currentPeriod),
+            transitionSnapshot: snap
+        )
+    }
+
+    /// True when the latest thing that happened was a period change, so "go
+    /// back" can reverse it without touching any recorded play.
+    var canGoBack: Bool {
+        lastUndoableEvent?.kind == .transition
+    }
+
+    var goBackLabel: String? {
+        guard canGoBack else { return nil }
+        return lastUndoableEvent?.goBackLabel
+    }
+
+    /// The most recent feed line that can be undone, skipping notes such as
+    /// "Resumed" so they never hide the Undo or Go Back buttons.
+    private var lastUndoableIndex: Int? {
+        events.lastIndex { $0.kind != .note && $0.undoClosure != nil }
+    }
+
+    var lastUndoableEvent: LiveEvent? {
+        lastUndoableIndex.map { events[$0] }
+    }
+
+    /// Reverse the most recent period change. Plays recorded since then would
+    /// have to be deleted first; while any exist the transition is no longer
+    /// the latest event and this does nothing.
+    func goBack() {
+        guard canGoBack else { return }
+        undoLast()
+    }
+
     func endPeriod() {
+        let snap = snapshot()
         let skippedSeconds = clockSeconds
         stopClock()
         closeAllShifts()
@@ -567,7 +1006,7 @@ final class LiveGameViewModel: Identifiable {
             activePenalties[i].remainingSeconds -= skippedSeconds
         }
         activePenalties.removeAll { $0.remainingSeconds <= 0 }
-        events.append(LiveEvent(emoji: "⏱️", description: "— End of \(periodLabel) Period —", undoClosure: nil))
+        appendTransition(emoji: "⏱️", description: "— End of \(periodLabel) Period —", from: snap)
         currentPeriod += 1
         if isClockSetUp {
             clockSeconds = periodLengthMinutes * 60
@@ -577,6 +1016,7 @@ final class LiveGameViewModel: Identifiable {
     }
 
     func goToOvertime() {
+        let snap = snapshot()
         stopClock()
         closeAllShifts()
         period = .overtime
@@ -584,20 +1024,38 @@ final class LiveGameViewModel: Identifiable {
         if isClockSetUp {
             clockSeconds = 5 * 60
         }
-        events.append(LiveEvent(emoji: "⏱️", description: "— OVERTIME —", undoClosure: nil))
+        appendTransition(emoji: "⏱️", description: "— OVERTIME —", from: snap)
         save()
         fire()
     }
 
     func goToShootout() {
+        let snap = snapshot()
         stopClock()
         closeAllShifts()
         period = .shootout
-        ourShootoutGoals = 0
-        theirShootoutGoals = 0
-        shootoutRoundNumber = 1
-        isOurShootoutTurn = true
-        events.append(LiveEvent(emoji: "🎯", description: "— SHOOTOUT —", undoClosure: nil))
+        goalsBeforeShootout = (game.goalsFor, game.goalsAgainst)
+        shootoutAttempts.removeAll()
+        recomputeShootout()
+        appendTransition(emoji: "🎯", description: "— SHOOTOUT —", from: snap)
+        save()
+        fire()
+    }
+
+    /// Jump straight to a regulation period or overtime, for when the wrong
+    /// button was tapped a while ago and the plays since are fine. Recorded
+    /// plays keep the period they were stamped with; fix those from the feed.
+    /// Undoable like any other transition.
+    func setPeriod(number: Int) {
+        let target: GamePeriod = number >= 4 ? .overtime : .regulation
+        let clamped = max(1, min(number, 4))
+        guard period != .shootout, target != period || clamped != currentPeriod else { return }
+        let snap = snapshot()
+        stopClock()
+        closeAllShifts()
+        period = target
+        currentPeriod = clamped
+        appendTransition(emoji: "⏱️", description: "— Period set to \(label(for: target, number: clamped)) —", from: snap)
         save()
         fire()
     }
@@ -605,49 +1063,111 @@ final class LiveGameViewModel: Identifiable {
     // MARK: - Shootout
 
     func recordShootoutAttempt(player: Player, isGoal: Bool) {
-        let label = playerLabel(player)
-        if isGoal {
-            ourShootoutGoals += 1
-            game.goalsFor += 1
-            events.append(LiveEvent(emoji: "🎯", description: "SO Rd \(shootoutRoundNumber): \(label) — GOAL!") {
-                self.ourShootoutGoals -= 1
-                self.game.goalsFor -= 1
-            })
-        } else {
-            events.append(LiveEvent(emoji: "🎯", description: "SO Rd \(shootoutRoundNumber): \(label) — Miss", undoClosure: nil))
+        addShootoutAttempt(isOurs: true, player: player, isGoal: isGoal)
+    }
+
+    func recordShootoutAttemptAgainst(isGoal: Bool) {
+        addShootoutAttempt(isOurs: false, player: nil, isGoal: isGoal)
+    }
+
+    private func addShootoutAttempt(isOurs: Bool, player: Player?, isGoal: Bool) {
+        var attempt = ShootoutAttempt(isOurs: isOurs, player: player, isGoal: isGoal)
+        if !isOurs, let goalie = activeGoalie {
+            let round = ShootoutRound(roundNumber: shootoutRoundNumber, isGoal: isGoal)
+            round.goalieStats = findOrCreateGoalieStats(for: goalie)
+            modelContext.insert(round)
+            attempt.round = round
         }
-        isOurShootoutTurn = false
+        shootoutAttempts.append(attempt)
+        let id = attempt.id
+        events.append(LiveEvent(
+            emoji: "🎯",
+            description: "",
+            undoClosure: { [weak self] in self?.removeShootoutAttempt(id: id, removeEvent: false) },
+            kind: .shootout,
+            shootoutAttemptId: id
+        ))
+        recomputeShootout()
         save()
         fire()
     }
 
-    func recordShootoutAttemptAgainst(isGoal: Bool) {
-        guard let goalie = activeGoalie else { return }
-        let goalieStats = findOrCreateGoalieStats(for: goalie)
+    func shootoutAttempt(id: UUID) -> ShootoutAttempt? {
+        shootoutAttempts.first { $0.id == id }
+    }
 
-        let round = ShootoutRound(roundNumber: shootoutRoundNumber, isGoal: isGoal)
-        round.goalieStats = goalieStats
-        modelContext.insert(round)
-
-        if isGoal {
-            theirShootoutGoals += 1
-            game.goalsAgainst += 1
-            events.append(LiveEvent(emoji: "🎯", description: "SO Rd \(shootoutRoundNumber): Opponent — GOAL") {
-                self.theirShootoutGoals -= 1
-                self.game.goalsAgainst -= 1
-                self.modelContext.delete(round)
-            })
-        } else {
-            let label = playerLabel(goalie)
-            events.append(LiveEvent(emoji: "🎯", description: "SO Rd \(shootoutRoundNumber): \(label) — SAVE!") {
-                self.modelContext.delete(round)
-            })
+    /// Change the shooter and/or result of an attempt already recorded.
+    func updateShootoutAttempt(id: UUID, player: Player?, isGoal: Bool) {
+        guard let index = shootoutAttempts.firstIndex(where: { $0.id == id }) else { return }
+        if shootoutAttempts[index].isOurs {
+            shootoutAttempts[index].player = player
         }
-
-        isOurShootoutTurn = true
-        shootoutRoundNumber += 1
+        shootoutAttempts[index].isGoal = isGoal
+        shootoutAttempts[index].round?.isGoal = isGoal
+        recomputeShootout()
         save()
         fire()
+    }
+
+    /// Drop an attempt. `removeEvent` is false when called from an undo or a
+    /// feed delete, which remove the feed line themselves.
+    func removeShootoutAttempt(id: UUID, removeEvent: Bool) {
+        guard let index = shootoutAttempts.firstIndex(where: { $0.id == id }) else { return }
+        if let round = shootoutAttempts[index].round {
+            modelContext.delete(round)
+        }
+        shootoutAttempts.remove(at: index)
+        if removeEvent {
+            events.removeAll { $0.shootoutAttemptId == id }
+        }
+        recomputeShootout()
+        save()
+    }
+
+    /// Re-derive score, round numbers, whose turn it is, and the feed text
+    /// from the attempt list.
+    private func recomputeShootout() {
+        var ours = 0
+        var theirs = 0
+        for index in shootoutAttempts.indices {
+            if shootoutAttempts[index].isOurs {
+                ours += 1
+                shootoutAttempts[index].roundNumber = ours
+            } else {
+                theirs += 1
+                shootoutAttempts[index].roundNumber = theirs
+            }
+            shootoutAttempts[index].round?.roundNumber = shootoutAttempts[index].roundNumber
+        }
+
+        ourShootoutGoals = shootoutAttempts.filter { $0.isOurs && $0.isGoal }.count
+        theirShootoutGoals = shootoutAttempts.filter { !$0.isOurs && $0.isGoal }.count
+        shootoutRoundNumber = min(ours, theirs) + 1
+        isOurShootoutTurn = ours <= theirs
+
+        if period == .shootout {
+            game.goalsFor = goalsBeforeShootout.for + ourShootoutGoals
+            game.goalsAgainst = goalsBeforeShootout.against + theirShootoutGoals
+        }
+
+        for attempt in shootoutAttempts {
+            if let eventIndex = events.firstIndex(where: { $0.shootoutAttemptId == attempt.id }) {
+                events[eventIndex].description = shootoutDescription(attempt)
+            }
+        }
+    }
+
+    private func shootoutDescription(_ attempt: ShootoutAttempt) -> String {
+        let prefix = "SO Rd \(attempt.roundNumber): "
+        if attempt.isOurs {
+            let label = attempt.player.map { playerLabel($0) } ?? "Shooter"
+            return prefix + label + (attempt.isGoal ? " — GOAL!" : " — Miss")
+        }
+        if attempt.isGoal {
+            return prefix + "Opponent — GOAL"
+        }
+        let label = (attempt.round?.goalieStats?.player ?? activeGoalie).map { playerLabel($0) } ?? "Goalie"
+        return prefix + label + " — SAVE!"
     }
 
     // MARK: - End Game & Auto Result
@@ -666,13 +1186,20 @@ final class LiveGameViewModel: Identifiable {
         game.result = result.rawValue
         game.isComplete = true
 
-        if let goalie = activeGoalie {
-            let goalieStats = findOrCreateGoalieStats(for: goalie)
-            goalieStats.result = result.rawValue
+        let decided = goalieOfRecord(for: result)
+        if let decided {
+            findOrCreateGoalieStats(for: decided).result = result.rawValue
+        }
+        // Everyone else in goal gets no decision, and a goalie who never
+        // faced a shot loses the empty line an accidental change left behind.
+        for line in game.goalieStats where line.player?.persistentModelID != decided?.persistentModelID {
+            line.result = ""
+            if let goalie = line.player { pruneEmptyGoalieLine(for: goalie) }
         }
 
         closeAllShifts()
         persistTOI()
+        stopLivePublishing()
 
         // GWG: the Nth goal where N = opponent final goals + 1 (reg/OT only)
         if period != .shootout && game.goalsFor > game.goalsAgainst {
@@ -693,6 +1220,48 @@ final class LiveGameViewModel: Identifiable {
         save()
     }
 
+    /// Hockey's goalie of record. On a win, the goalie in net when the winning
+    /// goal was scored; on a loss, the goalie who allowed the deciding goal
+    /// against; in a shootout, the goalie who faced it. Other goalies who
+    /// appeared get no decision.
+    func goalieOfRecord(for result: GameResult) -> Player? {
+        let log = events.compactMap(\.gameEvent)
+
+        func goalie(withId id: String) -> Player? {
+            guard !id.isEmpty else { return nil }
+            return (checkedInPlayers + availablePlayers).first { $0.playerId == id }
+        }
+
+        func goalieInNet(before index: Int) -> Player? {
+            for event in log[..<index].reversed() where event.type == "goalieChange" {
+                if let player = goalie(withId: event.playerId) { return player }
+            }
+            return game.startingGoalie ?? activeGoalie
+        }
+
+        switch result {
+        case .shootoutWin, .shootoutLoss:
+            return activeGoalie
+        case .win:
+            let deciding = game.goalsAgainst + 1
+            var count = 0
+            for (index, event) in log.enumerated() where event.type == "goal" {
+                count += 1
+                if count == deciding { return goalieInNet(before: index) }
+            }
+        case .loss, .overtimeLoss:
+            let deciding = game.goalsFor + 1
+            var count = 0
+            for (index, event) in log.enumerated() where event.type == "goalAgainst" {
+                count += 1
+                if count == deciding {
+                    return goalie(withId: event.playerId) ?? goalieInNet(before: index)
+                }
+            }
+        }
+        return activeGoalie
+    }
+
     // MARK: - Record Actions
 
     func recordShot(player: Player) {
@@ -710,7 +1279,9 @@ final class LiveGameViewModel: Identifiable {
         fire()
     }
 
-    func recordGoal(scorer: Player, primaryAssist: Player?, secondaryAssist: Player?, clockTime: String = "", isPowerPlay: Bool = false, isShortHanded: Bool = false) {
+    /// `onIce` replays who was on the ice when an edited goal was scored —
+    /// their stored ids — instead of whoever is on now. Nil means right now.
+    func recordGoal(scorer: Player, primaryAssist: Player?, secondaryAssist: Player?, clockTime: String = "", isPowerPlay: Bool = false, isShortHanded: Bool = false, onIce: OnIceSnapshot? = nil) {
         let scorerStats = findOrCreatePlayerStats(for: scorer)
         scorerStats.goals += 1
         if isPowerPlay { scorerStats.powerPlayGoals += 1 }
@@ -735,12 +1306,10 @@ final class LiveGameViewModel: Identifiable {
         }
 
         // +/- applies on even-strength and short-handed goals, not power play
+        let onIceNow = onIce ?? currentOnIce()
         var plusMinusPlayers: [Player] = []
         if !isPowerPlay {
-            let goalieId = activeGoalie?.persistentModelID
-            plusMinusPlayers = checkedInPlayers.filter {
-                onIcePlayers.contains($0.persistentModelID) && $0.persistentModelID != goalieId
-            }
+            plusMinusPlayers = onIceNow.skaters
             for p in plusMinusPlayers {
                 findOrCreatePlayerStats(for: p).plusMinus += 1
             }
@@ -749,7 +1318,7 @@ final class LiveGameViewModel: Identifiable {
         let label = playerLabel(scorer)
         let timeStr = clockTime.isEmpty ? "" : " \(clockTime)"
         let strengthStr = isPowerPlay ? " PP" : isShortHanded ? " SH" : ""
-        let event = createEvent(type: "goal", player: scorer, clockTime: clockTime, assist1: primaryAssist, assist2: secondaryAssist, isPowerPlay: isPowerPlay, isShortHanded: isShortHanded, onIcePlayerIds: onIcePlayerIdString())
+        let event = createEvent(type: "goal", player: scorer, clockTime: clockTime, assist1: primaryAssist, assist2: secondaryAssist, isPowerPlay: isPowerPlay, isShortHanded: isShortHanded, onIcePlayerIds: onIceNow.storedIds)
         let wasPP = isPowerPlay
         let wasSH = isShortHanded
         let pmSnapshot = plusMinusPlayers
@@ -848,12 +1417,14 @@ final class LiveGameViewModel: Identifiable {
         fire()
     }
 
-    func recordShotAgainst() {
-        guard let goalie = activeGoalie else { return }
+    func recordShotAgainst(goalie inNet: Player? = nil) {
+        guard let goalie = inNet ?? activeGoalie else { return }
         let stats = findOrCreateGoalieStats(for: goalie)
         stats.shotsAgainst += 1
         let label = playerLabel(goalie)
-        let event = createEvent(type: "shotAgainst")
+        // The goalie in net is stamped on the event so a relief goalie's shots
+        // stay theirs when stats are rebuilt from the event log.
+        let event = createEvent(type: "shotAgainst", player: goalie)
         events.append(LiveEvent(emoji: "🧤", description: "\(periodLabel) Shot Against (\(label))", undoClosure: {
             stats.shotsAgainst -= 1
             self.removeGameEvent(event)
@@ -862,20 +1433,18 @@ final class LiveGameViewModel: Identifiable {
         fire()
     }
 
-    func recordGoalAgainst(clockTime: String = "", isPowerPlay: Bool = false) {
-        guard let goalie = activeGoalie else { return }
+    func recordGoalAgainst(clockTime: String = "", isPowerPlay: Bool = false, goalie inNet: Player? = nil, onIce: OnIceSnapshot? = nil) {
+        guard let goalie = inNet ?? activeGoalie else { return }
         let stats = findOrCreateGoalieStats(for: goalie)
         stats.shotsAgainst += 1
         stats.goalsAgainst += 1
         game.goalsAgainst += 1
 
         // +/- applies on even-strength and short-handed goals, not power play
+        let onIceNow = onIce ?? currentOnIce()
         var plusMinusPlayers: [Player] = []
         if !isPowerPlay {
-            let goalieId = activeGoalie?.persistentModelID
-            plusMinusPlayers = checkedInPlayers.filter {
-                onIcePlayers.contains($0.persistentModelID) && $0.persistentModelID != goalieId
-            }
+            plusMinusPlayers = onIceNow.skaters
             for p in plusMinusPlayers {
                 findOrCreatePlayerStats(for: p).plusMinus -= 1
             }
@@ -884,7 +1453,7 @@ final class LiveGameViewModel: Identifiable {
         let label = playerLabel(goalie)
         let timeStr = clockTime.isEmpty ? "" : " \(clockTime)"
         let ppStr = isPowerPlay ? " PP" : ""
-        let event = createEvent(type: "goalAgainst", clockTime: clockTime, isPowerPlay: isPowerPlay, onIcePlayerIds: onIcePlayerIdString())
+        let event = createEvent(type: "goalAgainst", player: goalie, clockTime: clockTime, isPowerPlay: isPowerPlay, onIcePlayerIds: onIceNow.storedIds)
         let pmSnapshot = plusMinusPlayers
         events.append(LiveEvent(emoji: "🚨", description: "\(periodLabel)\(timeStr) GOAL AGAINST\(ppStr) (\(label))", undoClosure: {
             stats.shotsAgainst -= 1
@@ -925,9 +1494,9 @@ final class LiveGameViewModel: Identifiable {
     }
 
     func undoLast() {
-        guard let last = events.last, last.undoClosure != nil else { return }
-        last.undoClosure?()
-        events.removeLast()
+        guard let index = lastUndoableIndex else { return }
+        events[index].undoClosure?()
+        events.remove(at: index)
         save()
         haptic.impactOccurred()
         haptic.prepare()
@@ -940,6 +1509,8 @@ final class LiveGameViewModel: Identifiable {
         pendingGoalScorer = nil
         pendingPrimaryAssist = nil
         pendingSecondaryAssist = nil
+        pendingOnIce = Set(currentOnIce().skaters.map(\.persistentModelID))
+        pendingOnIceUpdatesLine = true
         pendingClockTime = currentClockTime
         if onPowerPlay { pendingGoalStrength = 1 }
         else if shortHanded { pendingGoalStrength = 2 }
@@ -969,13 +1540,27 @@ final class LiveGameViewModel: Identifiable {
 
     func finalizeGoalWithTime() {
         guard let scorer = pendingGoalScorer else { return }
-        recordGoal(scorer: scorer, primaryAssist: pendingPrimaryAssist, secondaryAssist: pendingSecondaryAssist, clockTime: pendingClockTime, isPowerPlay: pendingGoalStrength == 1, isShortHanded: pendingGoalStrength == 2)
+        let onIceIds = pendingOnIce.union(goalFlowRequiredOnIce)
+        if pendingOnIceUpdatesLine {
+            applyOnIceToLive(onIceIds)
+        }
+        recordGoal(
+            scorer: scorer, primaryAssist: pendingPrimaryAssist, secondaryAssist: pendingSecondaryAssist,
+            clockTime: pendingClockTime, isPowerPlay: pendingGoalStrength == 1, isShortHanded: pendingGoalStrength == 2,
+            onIce: onIceSnapshot(skaterIds: onIceIds, goalie: activeGoalie)
+        )
+        pendingOnIce = []
         pendingGoalScorer = nil
         pendingPrimaryAssist = nil
         pendingSecondaryAssist = nil
         pendingClockTime = ""
         pendingGoalStrength = 0
         currentAction = nil
+    }
+
+    /// Scorer and assists picked so far — they were on the ice by definition.
+    var goalFlowRequiredOnIce: Set<PersistentIdentifier> {
+        Set([pendingGoalScorer, pendingPrimaryAssist, pendingSecondaryAssist].compactMap { $0?.persistentModelID })
     }
 
     var goalFlowExcludedPlayers: Set<PersistentIdentifier> {
@@ -999,9 +1584,20 @@ final class LiveGameViewModel: Identifiable {
 
     // MARK: - Edit Event (delete + re-record)
 
-    func replaceEvent(at index: Int, player: Player?, clockTime: String, isPowerPlay: Bool, isShortHanded: Bool, assist1: Player?, assist2: Player?, penaltyType: PenaltyType?, faceoffWon: Bool?, opponentNumber: String, period: Int) {
+    /// `onIce`, for goals and goals against, is a corrected list of the
+    /// skaters who were on the ice. Nil keeps the list recorded with the goal.
+    func replaceEvent(at index: Int, player: Player?, clockTime: String, isPowerPlay: Bool, isShortHanded: Bool, assist1: Player?, assist2: Player?, penaltyType: PenaltyType?, faceoffWon: Bool?, opponentNumber: String, period: Int, onIce: [Player]? = nil) {
         guard events.indices.contains(index), let gameEvent = events[index].gameEvent else { return }
         let eventType = gameEvent.type
+        // Resolve before the undo below deletes the event: an edited shot or
+        // goal against stays with the goalie who faced it, not whoever is in
+        // net now.
+        let originalGoalie = goalieInNet(at: gameEvent)
+        // +/- belongs to whoever was on the ice for the goal, not whoever is
+        // on the ice when the scorekeeper gets round to fixing it.
+        let originalOnIce = onIce.map {
+            onIceSnapshot(skaterIds: Set($0.map(\.persistentModelID)), goalie: originalGoalie)
+        } ?? recordedOnIce(for: gameEvent)
 
         // Undo old stats
         events[index].undoClosure?()
@@ -1017,7 +1613,7 @@ final class LiveGameViewModel: Identifiable {
             if let player { recordShot(player: player) }
         case "goal":
             if let player {
-                recordGoal(scorer: player, primaryAssist: assist1, secondaryAssist: assist2, clockTime: clockTime, isPowerPlay: isPowerPlay, isShortHanded: isShortHanded)
+                recordGoal(scorer: player, primaryAssist: assist1, secondaryAssist: assist2, clockTime: clockTime, isPowerPlay: isPowerPlay, isShortHanded: isShortHanded, onIce: originalOnIce)
             }
         case "hit":
             if let player { recordHit(player: player) }
@@ -1028,9 +1624,9 @@ final class LiveGameViewModel: Identifiable {
         case "penalty":
             if let player, let pType = penaltyType { recordPenalty(player: player, type: pType, clockTime: clockTime) }
         case "shotAgainst":
-            recordShotAgainst()
+            recordShotAgainst(goalie: originalGoalie)
         case "goalAgainst":
-            recordGoalAgainst(clockTime: clockTime, isPowerPlay: isPowerPlay)
+            recordGoalAgainst(clockTime: clockTime, isPowerPlay: isPowerPlay, goalie: originalGoalie, onIce: originalOnIce)
         case "penaltyAgainst":
             if let pType = penaltyType { recordOpponentPenalty(jerseyNumber: opponentNumber, type: pType, clockTime: clockTime) }
         default:
@@ -1043,6 +1639,284 @@ final class LiveGameViewModel: Identifiable {
 
     func findPlayer(named name: String, number: Int) -> Player? {
         checkedInPlayers.first { $0.name == name && $0.number == number }
+    }
+
+    // MARK: - Session Persistence (leave and resume, reopen after end)
+
+    private func playerId(_ id: PersistentIdentifier) -> String? {
+        let pid = checkedInPlayers.first { $0.persistentModelID == id }?.playerId
+        return (pid?.isEmpty ?? true) ? nil : pid
+    }
+
+    private func stringKeyed<V>(_ dict: [PersistentIdentifier: V]) -> [String: V] {
+        var out: [String: V] = [:]
+        for (id, value) in dict {
+            if let pid = playerId(id) { out[pid] = value }
+        }
+        return out
+    }
+
+    func exportState() -> LiveSessionState {
+        let feed: [LiveSessionState.FeedLine] = events.map { event in
+            var line = LiveSessionState.FeedLine(kind: "note", emoji: event.emoji, description: event.description)
+            switch event.kind {
+            case .action:
+                if let gameEvent = event.gameEvent {
+                    line.kind = "action"
+                    line.eventCreatedAt = gameEvent.createdAt
+                }
+            case .transition:
+                line.kind = "transition"
+                line.transition = event.transitionSnapshot
+                line.goBackLabel = event.goBackLabel
+            case .shootout:
+                line.kind = "shootout"
+                line.attemptIndex = shootoutAttempts.firstIndex { $0.id == event.shootoutAttemptId }
+            case .note:
+                break
+            }
+            return line
+        }
+
+        return LiveSessionState(
+            gameId: game.gameId,
+            savedAt: Date(),
+            period: period.rawValue,
+            currentPeriod: currentPeriod,
+            periodLengthMinutes: periodLengthMinutes,
+            clockSeconds: clockSeconds,
+            isClockSetUp: isClockSetUp,
+            activePenalties: activePenalties.map(Self.penaltyState),
+            checkedInPlayerIds: checkedInPlayers.map(\.playerId),
+            activeGoalieId: activeGoalie?.playerId,
+            onIcePlayerIds: onIcePlayers.compactMap(playerId),
+            playerTOI: stringKeyed(playerTOI),
+            currentShiftSeconds: stringKeyed(currentShiftSeconds),
+            shiftStartClockTime: stringKeyed(shiftStartClockTime),
+            playerLines: stringKeyed(playerLines),
+            playerGamePosition: stringKeyed(playerGamePosition),
+            playerGameRole: stringKeyed(playerGameRole),
+            shootoutAttempts: shootoutAttempts.map {
+                LiveSessionState.Attempt(
+                    isOurs: $0.isOurs,
+                    playerId: $0.player?.playerId,
+                    isGoal: $0.isGoal,
+                    roundNumber: $0.roundNumber,
+                    goaliePlayerId: $0.round?.goalieStats?.player?.playerId
+                )
+            },
+            goalsBeforeShootoutFor: goalsBeforeShootout.for,
+            goalsBeforeShootoutAgainst: goalsBeforeShootout.against,
+            feed: feed
+        )
+    }
+
+    /// Rebuild a live session from its saved state. `lookup` resolves player
+    /// ids (pass the whole roster); `eligible` is who may be added to the
+    /// lineup or put in goal.
+    static func resume(game: Game, modelContext: ModelContext, lookup: [Player], eligible: [Player], publishesLiveScore: Bool = true) -> LiveGameViewModel? {
+        guard let state = LiveSessionStore.load(gameId: game.gameId) else { return nil }
+        let vm = LiveGameViewModel(game: game, modelContext: modelContext)
+        vm.publishesLiveScore = publishesLiveScore
+        vm.availablePlayers = eligible
+        vm.restoreState(state, lookup: lookup)
+        return vm
+    }
+
+    private func restoreState(_ state: LiveSessionState, lookup pool: [Player]) {
+        var lookup: [String: Player] = [:]
+        for player in pool where !player.playerId.isEmpty { lookup[player.playerId] = player }
+        for stat in game.playerStats {
+            if let player = stat.player, !player.playerId.isEmpty { lookup[player.playerId] = player }
+        }
+        for stat in game.goalieStats {
+            if let player = stat.player, !player.playerId.isEmpty { lookup[player.playerId] = player }
+        }
+        func keyed<V>(_ dict: [String: V]) -> [PersistentIdentifier: V] {
+            var out: [PersistentIdentifier: V] = [:]
+            for (pid, value) in dict {
+                if let player = lookup[pid] { out[player.persistentModelID] = value }
+            }
+            return out
+        }
+
+        period = GamePeriod(rawValue: state.period) ?? .regulation
+        currentPeriod = state.currentPeriod
+        periodLengthMinutes = state.periodLengthMinutes
+        clockSeconds = state.clockSeconds
+        isClockSetUp = state.isClockSetUp
+        activePenalties = state.activePenalties.compactMap(Self.penalty)
+
+        checkedInPlayers = state.checkedInPlayerIds.compactMap { lookup[$0] }
+        activeGoalie = state.activeGoalieId.flatMap { lookup[$0] } ?? game.startingGoalie
+        onIcePlayers = Set(state.onIcePlayerIds.compactMap { lookup[$0]?.persistentModelID })
+        playerTOI = keyed(state.playerTOI)
+        currentShiftSeconds = keyed(state.currentShiftSeconds)
+        shiftStartClockTime = keyed(state.shiftStartClockTime)
+        playerLines = keyed(state.playerLines)
+        playerGamePosition = keyed(state.playerGamePosition)
+        playerGameRole = keyed(state.playerGameRole)
+        goalsBeforeShootout = (state.goalsBeforeShootoutFor, state.goalsBeforeShootoutAgainst)
+
+        // Shootout attempts. Opponent attempts re-attach to the persisted round
+        // on the line of the goalie who faced them (a goalie can change mid-
+        // shootout), matched by round number.
+        var roundPools: [String: [ShootoutRound]] = [:]
+        for line in game.goalieStats {
+            roundPools[line.player?.playerId ?? "", default: []].append(contentsOf: line.shootoutRounds)
+        }
+        let fallbackGoalieId = activeGoalie?.playerId ?? ""
+        shootoutAttempts = state.shootoutAttempts.map { saved in
+            var attempt = ShootoutAttempt(isOurs: saved.isOurs, player: saved.playerId.flatMap { lookup[$0] }, isGoal: saved.isGoal)
+            attempt.roundNumber = saved.roundNumber
+            if !saved.isOurs {
+                let key = saved.goaliePlayerId ?? fallbackGoalieId
+                if let index = roundPools[key]?.firstIndex(where: { $0.roundNumber == saved.roundNumber }) {
+                    attempt.round = roundPools[key]?.remove(at: index)
+                }
+            }
+            return attempt
+        }
+
+        // The feed, with every recorded play wired back to an undo.
+        var unclaimed = GameEvent.chronological(game.events)
+        var rebuilt: [LiveEvent] = []
+        for line in state.feed {
+            switch line.kind {
+            case "action":
+                if let created = line.eventCreatedAt,
+                   let index = unclaimed.firstIndex(where: { abs($0.createdAt.timeIntervalSince(created)) < 0.002 }) {
+                    let gameEvent = unclaimed.remove(at: index)
+                    rebuilt.append(LiveEvent(emoji: line.emoji, description: line.description, undoClosure: genericUndo(for: gameEvent), gameEvent: gameEvent))
+                } else {
+                    rebuilt.append(LiveEvent(emoji: line.emoji, description: line.description, undoClosure: nil))
+                }
+            case "transition":
+                if let snap = line.transition {
+                    rebuilt.append(transitionEvent(emoji: line.emoji, description: line.description, snapshot: snap))
+                } else {
+                    rebuilt.append(LiveEvent(emoji: line.emoji, description: line.description, undoClosure: nil))
+                }
+            case "shootout":
+                if let index = line.attemptIndex, shootoutAttempts.indices.contains(index) {
+                    let id = shootoutAttempts[index].id
+                    rebuilt.append(LiveEvent(
+                        emoji: line.emoji,
+                        description: line.description,
+                        undoClosure: { [weak self] in self?.removeShootoutAttempt(id: id, removeEvent: false) },
+                        kind: .shootout,
+                        shootoutAttemptId: id
+                    ))
+                }
+            default:
+                rebuilt.append(LiveEvent(emoji: line.emoji, description: line.description, undoClosure: nil, kind: .note))
+            }
+        }
+        // A play the saved feed never mentioned still gets a line, so nothing
+        // recorded is hidden from the scorekeeper.
+        for gameEvent in unclaimed {
+            rebuilt.append(LiveEvent(
+                emoji: Self.emoji(forEventType: gameEvent.type),
+                description: Self.describe(gameEvent),
+                undoClosure: genericUndo(for: gameEvent),
+                gameEvent: gameEvent
+            ))
+        }
+        events = rebuilt
+        recomputeShootout()
+        events.append(LiveEvent(emoji: "▶️", description: "— Resumed —", undoClosure: nil, kind: .note))
+        initializeStatsForCheckedInPlayers()
+    }
+
+    /// An undo for a play whose original closure was lost with the process:
+    /// reverse its stat impact and delete it, the same way the post-game
+    /// editor does, plus the score, plus/minus and penalty-timer effects the
+    /// editor does not track.
+    private func genericUndo(for gameEvent: GameEvent) -> () -> Void {
+        { [weak self] in
+            guard let self else { return }
+            // Stats and +/- (from the skaters stored on the event) — the same
+            // reversal the post-game editor uses.
+            EventStatAdjuster.subtract(gameEvent, game: self.game)
+            switch gameEvent.type {
+            case "goal":
+                self.game.goalsFor = max(0, self.game.goalsFor - 1)
+            case "goalAgainst":
+                self.game.goalsAgainst = max(0, self.game.goalsAgainst - 1)
+            case "penalty":
+                if let index = self.activePenalties.firstIndex(where: {
+                    $0.isOurs && $0.playerNumber == gameEvent.playerNumber && $0.type.rawValue == gameEvent.penaltyType
+                }) {
+                    self.activePenalties.remove(at: index)
+                }
+            case "penaltyAgainst":
+                if let index = self.activePenalties.firstIndex(where: {
+                    !$0.isOurs && $0.playerNumber == (Int(gameEvent.opponentNumber) ?? 0) && $0.type.rawValue == gameEvent.penaltyType
+                }) {
+                    self.activePenalties.remove(at: index)
+                }
+            case "goalieChange":
+                // Back to whoever was in net before this change.
+                let log = self.events.compactMap(\.gameEvent)
+                let earlier = log.prefix { $0 !== gameEvent }.last { $0.type == "goalieChange" }
+                let previous = earlier.flatMap { change in
+                    (self.checkedInPlayers + self.availablePlayers).first { $0.playerId == change.playerId }
+                } ?? self.game.startingGoalie
+                let removed = (self.checkedInPlayers + self.availablePlayers).first { $0.playerId == gameEvent.playerId }
+                if let previous { self.applyGoalie(previous) }
+                if let removed { self.pruneEmptyGoalieLine(for: removed) }
+            default:
+                break
+            }
+            self.removeGameEvent(gameEvent)
+        }
+    }
+
+    private static func emoji(forEventType type: String) -> String {
+        switch type {
+        case "goal", "goalAgainst": "🚨"
+        case "shot": "🏒"
+        case "shotAgainst": "🧤"
+        case "penalty", "penaltyAgainst": "🚫"
+        case "faceoffWin", "faceoffLoss": "🏑"
+        case "hit": "💥"
+        case "block": "🛡️"
+        default: "📝"
+        }
+    }
+
+    private static func describe(_ event: GameEvent) -> String {
+        let who = event.playerName.isEmpty ? "" : " #\(event.playerNumber) \(event.playerName)"
+        let time = event.clockTime.isEmpty ? "" : " \(event.clockTime)"
+        let what: String
+        switch event.type {
+        case "goal": what = "GOAL"
+        case "goalAgainst": what = "GOAL AGAINST"
+        case "shot": what = "Shot"
+        case "shotAgainst": what = "Shot Against"
+        case "penalty": what = "\(event.penaltyType) (\(event.penaltyMinutes) min)"
+        case "penaltyAgainst": what = "OPP #\(event.opponentNumber) — \(event.penaltyType)"
+        case "faceoffWin": what = "FO Won"
+        case "faceoffLoss": what = "FO Lost"
+        case "hit": what = "Hit"
+        case "block": what = "Block"
+        default: what = event.type
+        }
+        return "P\(event.period)\(time)\(who) — \(what)"
+    }
+
+    /// Take a game that was ended back to live scoring. Reverses what
+    /// "End Game" derived — result, goalie decision, game-winning goal — so
+    /// they are recomputed when the game is ended again.
+    func reopenAfterEnd() {
+        game.hasLocalEdits = true
+        game.isComplete = false
+        game.result = ""
+        for stats in game.goalieStats { stats.result = "" }
+        for stats in game.playerStats { stats.gameWinningGoals = 0 }
+        events.append(LiveEvent(emoji: "🔓", description: "— Game reopened —", undoClosure: nil, kind: .note))
+        livePublishingSuspended = false
+        save()
     }
 
     // MARK: - Goal Flash

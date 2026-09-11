@@ -5,6 +5,7 @@ import PhotosUI
 struct GameFormView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var modelContext
+    @Environment(SeasonStore.self) private var seasonStore
     @Query(sort: \Player.number) private var allPlayers: [Player]
     @Query(sort: \OpponentTeam.name) private var savedTeams: [OpponentTeam]
 
@@ -20,8 +21,9 @@ struct GameFormView: View {
     @State private var newTeamPhotoItem: PhotosPickerItem?
     @State private var newTeamLogoData: Data?
 
+    /// Goalies on the roster for the season the chosen date falls in.
     private var goalies: [Player] {
-        allPlayers.filter { $0.isGoalie }
+        allPlayers.filter { $0.isGoalie && seasonStore.isOnRoster($0, on: date) }
     }
 
     private var selectedTeam: OpponentTeam? {

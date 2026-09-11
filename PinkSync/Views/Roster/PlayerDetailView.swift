@@ -3,7 +3,23 @@ import SwiftUI
 struct PlayerDetailView: View {
     let player: Player
     @Environment(AuthManager.self) private var authManager
+    @Environment(SeasonStore.self) private var seasonStore
     @State private var showingEdit = false
+    @State private var seasonId: String?
+
+    private var selectedSeasonId: String {
+        seasonId ?? seasonStore.current?.id ?? Season.allId
+    }
+
+    private var seasonBinding: Binding<String> {
+        Binding(get: { selectedSeasonId }, set: { seasonId = $0 })
+    }
+
+    /// Regular season and playoffs together: a player page is a full record,
+    /// not the leader-board view.
+    private var totals: PlayerTotals {
+        player.totals(in: seasonStore.scope(seasonId: selectedSeasonId, type: nil))
+    }
 
     var body: some View {
         List {
@@ -28,40 +44,50 @@ struct PlayerDetailView: View {
                 }
             }
 
+            Section {
+                SeasonPicker(seasonId: seasonBinding)
+                if let seasonIds = player.seasonIds {
+                    let labels = seasonStore.newestFirst
+                        .filter { seasonIds.contains($0.id) }
+                        .map(\.label)
+                    statRow("On Roster", value: labels.isEmpty ? "No seasons" : labels.joined(separator: ", "))
+                }
+            }
+
             if player.isGoalie {
                 Section("Goalie Stats") {
-                    statRow("Games Played", value: "\(player.goalieGameStats.count)")
-                    statRow("Wins", value: "\(player.wins)")
-                    statRow("Losses", value: "\(player.losses)")
-                    statRow("OT Losses", value: "\(player.overtimeLosses)")
-                    statRow("Shots Against", value: "\(player.totalShotsAgainst)")
-                    statRow("Goals Against", value: "\(player.totalGoalsAgainst)")
-                    statRow("GAA", value: String(format: "%.2f", player.goalsAgainstAverage))
-                    statRow("SV%", value: String(format: "%.3f", player.savePercentage))
+                    statRow("Games Played", value: "\(totals.goalieGamesPlayed)")
+                    statRow("Wins", value: "\(totals.wins)")
+                    statRow("Losses", value: "\(totals.losses)")
+                    statRow("OT Losses", value: "\(totals.overtimeLosses)")
+                    statRow("Shots Against", value: "\(totals.totalShotsAgainst)")
+                    statRow("Goals Against", value: "\(totals.totalGoalsAgainst)")
+                    statRow("GAA", value: String(format: "%.2f", totals.goalsAgainstAverage))
+                    statRow("SV%", value: String(format: "%.3f", totals.savePercentage))
                 }
             }
 
             Section("Skater Stats") {
-                statRow("Games Played", value: "\(player.gamesPlayed)")
-                statRow("Goals", value: "\(player.totalGoals)")
-                statRow("Assists", value: "\(player.totalAssists)")
-                statRow("Points", value: "\(player.totalPoints)")
-                statRow("PPG", value: "\(player.totalPowerPlayGoals)")
-                statRow("PPA", value: "\(player.totalPowerPlayAssists)")
-                statRow("SHG", value: "\(player.totalShortHandedGoals)")
-                statRow("SHA", value: "\(player.totalShortHandedAssists)")
-                statRow("GWG", value: "\(player.totalGameWinningGoals)")
-                statRow("Shots", value: "\(player.totalShots)")
-                statRow("Hits", value: "\(player.totalHits)")
-                statRow("Blocks", value: "\(player.totalBlocks)")
-                statRow("PIM", value: "\(player.totalPenaltyMinutes)")
+                statRow("Games Played", value: "\(totals.gamesPlayed)")
+                statRow("Goals", value: "\(totals.totalGoals)")
+                statRow("Assists", value: "\(totals.totalAssists)")
+                statRow("Points", value: "\(totals.totalPoints)")
+                statRow("PPG", value: "\(totals.totalPowerPlayGoals)")
+                statRow("PPA", value: "\(totals.totalPowerPlayAssists)")
+                statRow("SHG", value: "\(totals.totalShortHandedGoals)")
+                statRow("SHA", value: "\(totals.totalShortHandedAssists)")
+                statRow("GWG", value: "\(totals.totalGameWinningGoals)")
+                statRow("Shots", value: "\(totals.totalShots)")
+                statRow("Hits", value: "\(totals.totalHits)")
+                statRow("Blocks", value: "\(totals.totalBlocks)")
+                statRow("PIM", value: "\(totals.totalPenaltyMinutes)")
             }
 
-            if player.totalFaceoffWins + player.totalFaceoffLosses > 0 {
+            if totals.totalFaceoffWins + totals.totalFaceoffLosses > 0 {
                 Section("Faceoffs") {
-                    statRow("Wins", value: "\(player.totalFaceoffWins)")
-                    statRow("Losses", value: "\(player.totalFaceoffLosses)")
-                    statRow("FO%", value: String(format: "%.1f%%", player.faceoffPercentage))
+                    statRow("Wins", value: "\(totals.totalFaceoffWins)")
+                    statRow("Losses", value: "\(totals.totalFaceoffLosses)")
+                    statRow("FO%", value: String(format: "%.1f%%", totals.faceoffPercentage))
                 }
             }
         }
@@ -87,6 +113,7 @@ struct PlayerDetailView: View {
             Spacer()
             Text(value)
                 .font(.system(.body, design: .monospaced, weight: .semibold))
+                .multilineTextAlignment(.trailing)
         }
     }
 }
