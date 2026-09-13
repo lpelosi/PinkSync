@@ -78,8 +78,15 @@ enum APIClient {
         request.httpBody = try JSONSerialization.data(withJSONObject: payload)
 
         let (data, response) = try await URLSession.shared.data(for: request)
-        guard let http = response as? HTTPURLResponse,
-              (200...299).contains(http.statusCode) else {
+        guard let http = response as? HTTPURLResponse else {
+            throw URLError(.badServerResponse)
+        }
+        // 401 means the server no longer honours this refresh token (revoked,
+        // expired, or the account is gone). Anything else is transient.
+        if http.statusCode == 401 {
+            throw AuthAPIError.refreshRejected
+        }
+        guard (200...299).contains(http.statusCode) else {
             throw URLError(.badServerResponse)
         }
         return try JSONDecoder().decode(RefreshResponse.self, from: data)
@@ -162,10 +169,12 @@ enum APIClient {
     enum AuthAPIError: LocalizedError {
         case invalidCredentials(String)
         case registrationFailed(String)
+        case refreshRejected
         var errorDescription: String? {
             switch self {
             case .invalidCredentials(let message): return message
             case .registrationFailed(let message): return message
+            case .refreshRejected: return "Session expired. Please sign in again."
             }
         }
     }

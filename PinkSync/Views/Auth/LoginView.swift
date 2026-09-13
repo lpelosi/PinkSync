@@ -1,5 +1,4 @@
 import AuthenticationServices
-import LocalAuthentication
 import SwiftUI
 
 struct LoginView: View {
@@ -13,7 +12,6 @@ struct LoginView: View {
     @State private var confirmPassword = ""
     @State private var isLoading = false
     @State private var errorMessage: String?
-    @State private var showBiometric = false
     @FocusState private var focusedField: Field?
 
     private enum Mode { case signIn, register }
@@ -52,14 +50,6 @@ struct LoginView: View {
 
                     primaryButton
 
-                    if showBiometric && mode == .signIn {
-                        Button(action: biometricSignIn) {
-                            Label("Sign in with Face ID", systemImage: "faceid")
-                                .font(.subheadline)
-                        }
-                        .tint(AppTheme.teal)
-                    }
-
                     divider
 
                     SignInWithAppleButton(
@@ -77,9 +67,6 @@ struct LoginView: View {
                     Spacer()
                 }
             }
-        }
-        .onAppear {
-            showBiometric = authManager.biometricEnabled && hasBiometricCapability()
         }
     }
 
@@ -198,7 +185,6 @@ struct LoginView: View {
         Task {
             do {
                 try await authManager.login(email: email, password: password)
-                offerBiometric()
             } catch {
                 errorMessage = error.localizedDescription
             }
@@ -230,20 +216,6 @@ struct LoginView: View {
         }
     }
 
-    private func biometricSignIn() {
-        isLoading = true
-        errorMessage = nil
-
-        Task {
-            do {
-                try await authManager.authenticateWithBiometric()
-            } catch {
-                errorMessage = error.localizedDescription
-            }
-            isLoading = false
-        }
-    }
-
     private func configureAppleRequest(_ request: ASAuthorizationAppleIDRequest) {
         request.requestedScopes = [.fullName, .email]
     }
@@ -260,17 +232,5 @@ struct LoginView: View {
             }
             isLoading = false
         }
-    }
-
-    private func offerBiometric() {
-        if !authManager.biometricEnabled && hasBiometricCapability() {
-            authManager.biometricEnabled = true
-        }
-    }
-
-    private func hasBiometricCapability() -> Bool {
-        let context = LAContext()
-        var error: NSError?
-        return context.canEvaluatePolicy(.deviceOwnerAuthenticationWithBiometrics, error: &error)
     }
 }
