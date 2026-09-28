@@ -306,13 +306,15 @@ struct GamesListView: View {
         .task {
             async let s: () = syncGamesFromServer()
             async let f: () = fetchSchedule()
-            _ = await (s, f)
+            async let l: () = syncTeamLogos()
+            _ = await (s, f, l)
         }
         .refreshable {
             async let s: () = syncGamesFromServer()
             async let f: () = fetchSchedule()
             async let t: () = tournamentStore.load()
-            _ = await (s, f, t)
+            async let l: () = syncTeamLogos()
+            _ = await (s, f, t, l)
         }
     }
 
@@ -370,6 +372,10 @@ struct GamesListView: View {
     }
 
     // MARK: - Sync
+
+    private func syncTeamLogos() async {
+        await TeamLogoSync.sync(modelContext: modelContext)
+    }
 
     private func syncGamesFromServer() async {
         isSyncing = true

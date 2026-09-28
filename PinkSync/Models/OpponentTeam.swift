@@ -6,8 +6,15 @@ final class OpponentTeam {
     var name: String
     /// Asset catalog image name for bundled logos
     var logoAsset: String?
-    /// User-provided logo image data (JPEG)
+    /// The logo as shown: a copy of the server's, or one picked on this device
+    /// that has yet to be uploaded.
     @Attribute(.externalStorage) var logoData: Data?
+    /// The server's versioned path for the logo `logoData` is a copy of. The
+    /// server is the source of truth: when its path differs, the copy is stale.
+    /// Nil when the logo has never been matched with the server.
+    var logoVersion: String?
+    /// The logo was changed on this device and the server has not had it yet.
+    var logoNeedsUpload: Bool = false
 
     init(name: String, logoAsset: String? = nil, logoData: Data? = nil) {
         self.name = name

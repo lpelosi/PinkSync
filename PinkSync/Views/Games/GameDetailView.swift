@@ -10,7 +10,6 @@ struct GameDetailView: View {
     @Environment(SeasonStore.self) private var seasonStore
     @Environment(TournamentStore.self) private var tournamentStore
     @Query(sort: \Player.number) private var allPlayers: [Player]
-    @Query private var savedTeams: [OpponentTeam]
 
     @Environment(\.dismiss) private var dismiss
 
@@ -660,16 +659,10 @@ struct GameDetailView: View {
             syncManager.markSent(game: game)
             try? modelContext.save()
 
-            // Upload opponent logo if we have one (user photo or asset catalog)
-            if let opponentTeam = savedTeams.first(where: { $0.name == game.opponent }) {
-                if let logoData = opponentTeam.logoData {
-                    await APIClient.sendTeamLogo(teamName: game.opponent, logoData: logoData)
-                } else if let asset = opponentTeam.logoAsset,
-                          let uiImage = UIImage(named: asset),
-                          let pngData = uiImage.pngData() {
-                    await APIClient.sendTeamLogo(teamName: game.opponent, logoData: pngData)
-                }
-            }
+            // The server keeps the logos. This sends one only if it was
+            // changed here or the server has none, and never overwrites the
+            // server's copy with whatever this device happens to hold.
+            await TeamLogoSync.sync(modelContext: modelContext)
         } catch let error as APIClient.ValidationError {
             // Nothing a retry can fix (e.g. no result after reopening a game):
             // tell the scorekeeper instead of queueing it forever.

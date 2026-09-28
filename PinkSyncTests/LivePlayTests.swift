@@ -64,11 +64,17 @@ final class LivePlayTests: XCTestCase {
         XCTAssertEqual(vm.lastLivePlay?.note, PenaltyType.minor.rawValue)
     }
 
-    func testShotsFaceoffsAndGoalsAgainstAreNot() {
+    func testAShotOnGoalIsAnnounced() {
+        vm.recordShot(player: helper)
+
+        XCTAssertEqual(vm.lastLivePlay?.type, "shot")
+        XCTAssertEqual(vm.lastLivePlay?.playerId, helper.playerId)
+    }
+
+    func testFaceoffsAndGoalsAgainstAreNot() {
         vm.recordGoal(scorer: scorer, primaryAssist: nil, secondaryAssist: nil)
         let goal = vm.lastLivePlay
 
-        vm.recordShot(player: helper)
         vm.recordFaceoff(player: helper, won: true)
         vm.recordGoalAgainst()
 

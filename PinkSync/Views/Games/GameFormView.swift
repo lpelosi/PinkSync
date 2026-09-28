@@ -225,6 +225,7 @@ struct GameFormView: View {
         // Save custom team if requested
         if useCustomOpponent && saveNewTeam && !opponent.isEmpty {
             let newTeam = OpponentTeam(name: opponent, logoData: newTeamLogoData)
+            newTeam.logoNeedsUpload = newTeamLogoData != nil
             modelContext.insert(newTeam)
         }
 
@@ -234,5 +235,8 @@ struct GameFormView: View {
         game.startingGoalie = goalies.first { $0.persistentModelID == selectedGoalieID }
         modelContext.insert(game)
         try? modelContext.save()
+
+        let context = modelContext
+        Task { await TeamLogoSync.sync(modelContext: context) }
     }
 }

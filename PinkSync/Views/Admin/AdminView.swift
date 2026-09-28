@@ -113,6 +113,19 @@ struct AdminView: View {
                 Text("Book a tournament and set who is travelling. Its games are kept out of the season stats.")
             }
 
+            // Team Logos
+            Section {
+                NavigationLink {
+                    TeamLogosView()
+                } label: {
+                    Label("Team Logos", systemImage: "photo.on.rectangle.angled")
+                }
+            } header: {
+                Text("Teams")
+            } footer: {
+                Text("Logos are kept on the website and copied to every device. Replace one here and it changes everywhere.")
+            }
+
             // User Management
             Section {
                 NavigationLink {
