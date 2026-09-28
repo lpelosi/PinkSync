@@ -338,7 +338,10 @@ struct StatsTable {
                 goalie: player.goalieGameStats.filter { counts($0.game) }
             )
             let onRoster: Bool
-            if let tournament {
+            if !player.isActive {
+                // No longer on the server's roster: only what they played.
+                onRoster = false
+            } else if let tournament {
                 onRoster = tournament.isOnRoster(player)
             } else if Tournament.tournamentId(fromSelection: seasonId) != nil {
                 // A tournament this device has no record of: only who played.
