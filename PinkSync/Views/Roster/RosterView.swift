@@ -25,12 +25,24 @@ struct RosterView: View {
     /// the season or the tournament being viewed, the same way the site's
     /// roster page does.
     private var visiblePlayers: [Player] {
-        if selectedSeasonId == Season.allId { return players }
-        if Tournament.tournamentId(fromSelection: selectedSeasonId) != nil {
-            guard let tournament = tournamentStore.tournament(forSelection: selectedSeasonId) else { return [] }
-            return players.filter { tournament.isOnRoster($0) }
+        Self.roster(
+            from: players,
+            selection: selectedSeasonId,
+            tournament: tournamentStore.tournament(forSelection: selectedSeasonId)
+        )
+    }
+
+    /// Who the roster lists for a picker selection. A player the server no
+    /// longer has is kept on the device for the games they played, marked
+    /// inactive, and is on no roster.
+    static func roster(from players: [Player], selection: String, tournament: Tournament?) -> [Player] {
+        let onTeam = players.filter(\.isActive)
+        if selection == Season.allId { return onTeam }
+        if Tournament.tournamentId(fromSelection: selection) != nil {
+            guard let tournament else { return [] }
+            return onTeam.filter { tournament.isOnRoster($0) }
         }
-        return players.filter { $0.isMember(of: selectedSeasonId) }
+        return onTeam.filter { $0.isMember(of: selection) }
     }
 
     private var selectedTournament: Tournament? {
