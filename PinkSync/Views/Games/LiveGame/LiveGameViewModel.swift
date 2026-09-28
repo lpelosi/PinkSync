@@ -480,6 +480,10 @@ final class LiveGameViewModel: Identifiable {
     /// Flip a player's game-only role. Clears their position/line assignments since
     /// a Forward's "C" doesn't carry over to Defense pairings.
     func setGameRole(_ role: String, for player: Player) {
+        changeLine(of: player, to: nil, role: role)
+    }
+
+    private func applyGameRole(_ role: String, for player: Player) {
         let id = player.persistentModelID
         let rosterIsForward = isForwardPosition(player.position)
         let matchesRoster = (role == "Forward" && rosterIsForward) || (role == "Defense" && !rosterIsForward)
@@ -490,6 +494,98 @@ final class LiveGameViewModel: Identifiable {
         }
         playerGamePosition.removeValue(forKey: id)
         playerLines.removeValue(forKey: id)
+    }
+
+    // MARK: - Line Changes
+
+    static let forwardLines = ["F1", "F2", "F3", "F4"]
+    static let defensePairings = ["D1", "D2", "D3"]
+
+    /// Where a skater is slotted for this game: role override, line and
+    /// position. Nil means not set.
+    private struct LineSlot {
+        var role: String?
+        var line: String?
+        var position: String?
+    }
+
+    /// Whether anything has happened yet. Before it has, setting lines is
+    /// setup and stays out of the feed; after, every move is a line change.
+    var gameUnderway: Bool {
+        !game.events.isEmpty || playerTOI.values.contains { $0 > 0 }
+    }
+
+    /// "F2", or "F" / "D" for a skater with no line.
+    func lineSummary(for player: Player) -> String {
+        playerLines[player.persistentModelID] ?? (isForwardForGame(player) ? "F" : "D")
+    }
+
+    /// Move a skater to another line or pairing, or between forward and
+    /// defense, at any point in the game. A line tag decides the role ("D1"
+    /// is defense); with no line, `role` does, and with neither the skater
+    /// keeps their role and just comes off their line.
+    ///
+    /// Only the slotting changes. Whoever is on the ice stays on it, and
+    /// shifts, ice time and plus/minus carry on untouched. Undoable from the
+    /// feed once the game is underway.
+    func changeLine(of player: Player, to line: String?, role: String? = nil) {
+        let id = player.persistentModelID
+        guard id != activeGoalie?.persistentModelID else { return }
+
+        let line = (line?.isEmpty ?? true) ? nil : line
+        let currentRole = effectiveRole(for: player)
+        let targetRole: String
+        if let line {
+            guard Self.forwardLines.contains(line) || Self.defensePairings.contains(line) else { return }
+            targetRole = line.hasPrefix("F") ? "Forward" : "Defense"
+        } else {
+            targetRole = role ?? currentRole
+        }
+        guard targetRole == "Forward" || targetRole == "Defense" else { return }
+
+        let before = LineSlot(role: playerGameRole[id], line: playerLines[id], position: playerGamePosition[id])
+        let roleChanged = targetRole != currentRole
+        guard roleChanged || line != before.line else { return }
+
+        if roleChanged { applyGameRole(targetRole, for: player) }
+        playerLines[id] = line
+        // A line filter left pointing at a line nobody is on would hide the
+        // pill that turns it off.
+        if let filter = activeLineFilter, !playerLines.values.contains(filter) { activeLineFilter = nil }
+
+        if gameUnderway {
+            var description = playerLabel(player)
+            if roleChanged { description += " to \(targetRole.lowercased())" }
+            if let line {
+                description += roleChanged ? ", \(line)" : " to \(line)"
+            } else if !roleChanged, let old = before.line {
+                description += " off \(old)"
+            }
+            events.append(LiveEvent(
+                emoji: "🔀",
+                description: description,
+                undoClosure: { [weak self] in self?.restore(before, for: player) }
+            ))
+            fire()
+        }
+        save()
+    }
+
+    /// Set a skater's position within their line (C, LW, RW, LD, RD). Kept out
+    /// of the feed: it only orders the on-ice tiles.
+    func setGamePosition(_ position: String?, for player: Player) {
+        let id = player.persistentModelID
+        let position = (position?.isEmpty ?? true) ? nil : position
+        guard playerGamePosition[id] != position else { return }
+        playerGamePosition[id] = position
+        save()
+    }
+
+    private func restore(_ slot: LineSlot, for player: Player) {
+        let id = player.persistentModelID
+        playerGameRole[id] = slot.role
+        playerLines[id] = slot.line
+        playerGamePosition[id] = slot.position
     }
 
     /// Who was on the ice for a goal: the skaters who get +/-, and the id list
