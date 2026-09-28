@@ -26,6 +26,12 @@ final class GameEvent {
     var isPowerPlay: Bool = false
     var isShortHanded: Bool = false
     var onIcePlayerIds: String = ""
+
+    /// When the event was recorded, so a resumed live session can rebuild the
+    /// feed in order. Events from before this field existed read as distantPast
+    /// and sort first. Default constant allows lightweight SwiftData migration.
+    var createdAt: Date = Date.distantPast
+
     var game: Game?
 
     init(
@@ -64,5 +70,26 @@ final class GameEvent {
         self.opponentNumber = opponentNumber
         self.isPowerPlay = isPowerPlay
         self.isShortHanded = isShortHanded
+        self.createdAt = Date()
+    }
+
+    /// The stored on-ice list with its skaters replaced by `skaterIds`, keeping
+    /// any goalie ids it already had (the goalie in net is recorded with the
+    /// skaters but never gets +/-).
+    func onIceIds(replacingSkatersWith skaterIds: [String], goalieIds: Set<String>) -> String {
+        let keptGoalies = onIcePlayerIds.split(separator: ",").map(String.init).filter { goalieIds.contains($0) }
+        var seen = Set<String>()
+        return (skaterIds + keptGoalies)
+            .filter { !$0.isEmpty && seen.insert($0).inserted }
+            .joined(separator: ",")
+    }
+
+    /// Chronological order for a feed: by creation time, with legacy events
+    /// (no creation time) ordered by period.
+    static func chronological(_ events: [GameEvent]) -> [GameEvent] {
+        events.sorted { a, b in
+            if a.createdAt != b.createdAt { return a.createdAt < b.createdAt }
+            return a.period < b.period
+        }
     }
 }

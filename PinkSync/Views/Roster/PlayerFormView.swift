@@ -27,13 +27,24 @@ struct PlayerFormView: View {
     let mode: Mode
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var modelContext
-    @Query(sort: \Player.number) private var allPlayers: [Player]
+    @Environment(SeasonStore.self) private var seasonStore
+    @Environment(AuthManager.self) private var authManager
+
+    /// Photographers open this form to set a photo; the server rejects any
+    /// other change from them, so those fields are read-only for them.
+    private var canEditDetails: Bool { authManager.canEditRoster }
 
     @State private var name = ""
     @State private var number = ""
     @State private var position = "Forward"
     @State private var isGoalie = false
     @State private var isSubstitute = false
+
+    /// Seasons the player is on the roster for. Starts from the server's
+    /// membership; a player with none set is shown as on every season.
+    @State private var selectedSeasonIds: Set<String> = []
+    @State private var initialSeasonIds: Set<String> = []
+    @State private var seasonsPrepared = false
 
     @State private var selectedPhotoItem: PhotosPickerItem?
     @State private var selectedPhotoData: Data?
@@ -107,7 +118,12 @@ struct PlayerFormView: View {
                 TextField("Name", text: $name)
                 TextField("Number", text: $number)
                     .keyboardType(.numberPad)
+            } footer: {
+                if !canEditDetails {
+                    Text("Only roster managers and admins can change player details. You can update the photo.")
+                }
             }
+            .disabled(!canEditDetails)
 
             Section {
                 Picker("Position", selection: $position) {
@@ -118,12 +134,25 @@ struct PlayerFormView: View {
 
                 Toggle("Also plays Goalie", isOn: $isGoalie)
             }
+            .disabled(!canEditDetails)
 
             Section {
                 Toggle("Substitute Player", isOn: $isSubstitute)
             } footer: {
                 Text("Subs don't have a permanent jersey number — they wear another player's jersey on a game-by-game basis. Their existing stats are preserved.")
             }
+            .disabled(!canEditDetails)
+
+            Section {
+                ForEach(seasonStore.newestFirst) { season in
+                    Toggle(seasonTitle(season), isOn: seasonToggle(season.id))
+                }
+            } header: {
+                Text("Seasons")
+            } footer: {
+                Text("Which seasons this player appears on the roster for. Their stats from other seasons are kept either way.")
+            }
+            .disabled(!canEditDetails)
         }
         .navigationTitle(isEditing ? "Edit Player" : "Add Player")
         .toolbar {
@@ -156,7 +185,51 @@ struct PlayerFormView: View {
                 isSubstitute = player.isSubstitute
                 existingPhotoURL = player.photoURL
             }
+            prepareSeasons()
         }
+    }
+
+    // MARK: - Seasons
+
+    private func seasonTitle(_ season: Season) -> String {
+        season.id == seasonStore.current?.id ? "\(season.label) (Current)" : season.label
+    }
+
+    private func seasonToggle(_ seasonId: String) -> Binding<Bool> {
+        Binding(
+            get: { selectedSeasonIds.contains(seasonId) },
+            set: { isOn in
+                if isOn { selectedSeasonIds.insert(seasonId) } else { selectedSeasonIds.remove(seasonId) }
+            }
+        )
+    }
+
+    private func prepareSeasons() {
+        guard !seasonsPrepared else { return }
+        seasonsPrepared = true
+        let everySeason = Set(seasonStore.seasons.map(\.id))
+        switch mode {
+        case .add:
+            // A new player joins the season being played now.
+            selectedSeasonIds = Set([seasonStore.current?.id].compactMap { $0 })
+            initialSeasonIds = []
+        case .edit(let player):
+            selectedSeasonIds = player.seasonIds.map(Set.init) ?? everySeason
+            initialSeasonIds = selectedSeasonIds
+        }
+    }
+
+    /// The membership to store, in season order. Nil when an existing player
+    /// with no membership set was left untouched, so the server keeps treating
+    /// them as on every season rather than being pinned to today's list.
+    private func resolvedSeasonIds(for player: Player) -> [String]? {
+        if player.seasonIds == nil, case .edit = mode, selectedSeasonIds == initialSeasonIds {
+            return nil
+        }
+        // Seasons this device doesn't know about (the season list failed to
+        // load, or a newer app added one) have no toggle here, so they can't
+        // have been changed — keep them rather than silently dropping them.
+        return Season.membership(selected: selectedSeasonIds, known: seasonStore.seasons, previous: player.seasonIds)
     }
 
     private func save() async {
@@ -190,7 +263,8 @@ struct PlayerFormView: View {
                 let goalieFlag = isGoalie || position == "Goalie"
                 if existing.name != name || existing.number != num ||
                    existing.position != position || existing.isGoalie != goalieFlag ||
-                   existing.isSubstitute != isSubstitute {
+                   existing.isSubstitute != isSubstitute ||
+                   selectedSeasonIds != initialSeasonIds {
                     playerInfoChanged = true
                 }
                 existing.name = name
@@ -201,6 +275,10 @@ struct PlayerFormView: View {
                 player = existing
             }
 
+            if let seasonIds = resolvedSeasonIds(for: player) {
+                player.seasonIds = seasonIds
+            }
+
             if let photoData = selectedPhotoData {
                 let photoPath = try await APIClient.sendPlayerPhoto(
                     playerId: player.playerId,
@@ -209,8 +287,8 @@ struct PlayerFormView: View {
                 player.photoPath = photoPath
             }
 
-            if playerInfoChanged {
-                try await APIClient.pushRoster(players: allPlayers)
+            if playerInfoChanged && canEditDetails {
+                try await APIClient.savePlayer(player)
             }
 
             try modelContext.save()

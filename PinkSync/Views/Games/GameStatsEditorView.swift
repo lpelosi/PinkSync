@@ -5,9 +5,12 @@ struct GameStatsEditorView: View {
     let game: Game
     @Environment(\.modelContext) private var modelContext
     @Environment(\.dismiss) private var dismiss
+    @Environment(SeasonStore.self) private var seasonStore
+    @Environment(TournamentStore.self) private var tournamentStore
     @Query(sort: \Player.number) private var allPlayers: [Player]
 
     @State private var showingAddPlayer = false
+    @State private var openedWith = ""
 
     private var playersWithStats: [Player] {
         game.playerStats.compactMap { $0.player }
@@ -21,7 +24,12 @@ struct GameStatsEditorView: View {
 
     private var playersWithoutStats: [Player] {
         let existingIDs = Set(game.playerStats.compactMap { $0.player?.persistentModelID })
-        return allPlayers.filter { $0.isActive && !existingIDs.contains($0.persistentModelID) }
+        return allPlayers.filter { player in
+            player.isActive
+                && (tournamentStore.rosterDecision(for: player, tournamentId: game.tournamentId)
+                    ?? seasonStore.isOnRoster(player, on: game.date))
+                && !existingIDs.contains(player.persistentModelID)
+        }
     }
 
     var body: some View {
@@ -59,9 +67,11 @@ struct GameStatsEditorView: View {
             }
         }
         .navigationTitle("Edit Stats")
+        .onAppear { if openedWith.isEmpty { openedWith = game.statsSignature } }
         .toolbar {
             ToolbarItem(placement: .confirmationAction) {
                 Button("Done") {
+                    if game.statsSignature != openedWith { game.hasLocalEdits = true }
                     try? modelContext.save()
                     dismiss()
                 }
@@ -162,6 +172,7 @@ struct GoalieStatsEditRow: View {
             statStepper("Shots Against", value: $stats.shotsAgainst)
             statStepper("Goals Against", value: $stats.goalsAgainst)
             Picker("Result", selection: $stats.result) {
+                Text("No decision").tag("")
                 ForEach(GameResult.allCases) { result in
                     Text(result.displayName).tag(result.rawValue)
                 }
@@ -215,6 +226,7 @@ struct AddPlayerStatsSheet: View {
                         stats.player = player
                         stats.game = game
                         modelContext.insert(stats)
+                        game.hasLocalEdits = true
                         try? modelContext.save()
                         dismiss()
                     } label: {

@@ -29,7 +29,7 @@ struct GameEventEditorView: View {
 
     var body: some View {
         List {
-            if didModify && game.isSynced {
+            if game.hasLocalEdits && game.isSynced {
                 Section {
                     Label("Modified — re-send stats to update the server.", systemImage: "exclamationmark.triangle")
                         .font(.caption)
@@ -87,10 +87,9 @@ struct GameEventEditorView: View {
                         enrolledPlayers: enrolledPlayers,
                         onSave: {
                             didModify = true
-                            if game.isSynced {
-                                // Clear synced flag so the user knows to re-send
-                                game.isSynced = false
-                            }
+                            // Newer than the server's copy until re-sent; also
+                            // keeps a Games-tab refresh from overwriting it.
+                            game.hasLocalEdits = true
                             try? modelContext.save()
                         }
                     )
@@ -103,7 +102,7 @@ struct GameEventEditorView: View {
 
     private func isEditable(_ event: GameEvent) -> Bool {
         switch event.type {
-        case "penalty", "penaltyAgainst", "goal", "shot", "hit", "block", "faceoffWin", "faceoffLoss":
+        case "penalty", "penaltyAgainst", "goal", "goalAgainst", "shot", "hit", "block", "faceoffWin", "faceoffLoss":
             return true
         default:
             return false
@@ -177,6 +176,8 @@ struct GameEventEditorView: View {
             return "Goal Against \(strengthSuffix(event))"
         case "shotAgainst":
             return "Shot Against"
+        case "goalieChange":
+            return "Goalie Change — \(playerLabel(event)) in goal"
         default:
             return event.type
         }
@@ -195,10 +196,23 @@ struct GameEventEditorView: View {
             if event.assist2Number > 0 || !event.assist2Name.isEmpty {
                 parts.append("#\(event.assist2Number) \(event.assist2Name)")
             }
-            return parts.isEmpty ? nil : parts.joined(separator: ", ")
+            var lines = parts.isEmpty ? [] : [parts.joined(separator: ", ")]
+            if let onIce = onIceSummary(event) { lines.append(onIce) }
+            return lines.isEmpty ? nil : lines.joined(separator: "\n")
+        case "goalAgainst":
+            return onIceSummary(event)
         default:
             return nil
         }
+    }
+
+    /// "On ice: #7 #10 #22" for the skaters recorded on for a goal.
+    private func onIceSummary(_ event: GameEvent) -> String? {
+        let goalieIds = Set(game.goalieStats.compactMap { $0.player?.playerId })
+        let ids = event.onIcePlayerIds.split(separator: ",").map(String.init).filter { !goalieIds.contains($0) }
+        guard !ids.isEmpty else { return "On ice: not recorded" }
+        let numbers = ids.compactMap { id in enrolledPlayers.first { $0.playerId == id }?.jerseyText }
+        return "On ice: " + numbers.map { "#\($0)" }.joined(separator: " ")
     }
 
     private func playerLabel(_ event: GameEvent) -> String {
@@ -216,6 +230,7 @@ struct GameEventEditorView: View {
         switch type {
         case "goal", "goalAgainst": "circle.fill"
         case "shot", "shotAgainst": "hockey.puck"
+        case "goalieChange": "arrow.left.arrow.right"
         case "hit": "figure.american.football"
         case "block": "shield.fill"
         case "faceoffWin", "faceoffLoss": "circle.dotted"
@@ -237,7 +252,7 @@ struct GameEventEditorView: View {
         EventStatAdjuster.subtract(event, game: game)
         modelContext.delete(event)
         didModify = true
-        if game.isSynced { game.isSynced = false }
+        game.hasLocalEdits = true
         try? modelContext.save()
     }
 }
@@ -262,6 +277,16 @@ private struct EditEventSheet: View {
     @State private var opponentNumber: String = ""
     @State private var isPowerPlay: Bool = false
     @State private var isShortHanded: Bool = false
+    @State private var onIceIDs: Set<PersistentIdentifier> = []
+
+    private var isGoalAgainst: Bool { event.type == "goalAgainst" }
+    private var goalieIds: Set<String> { Set(game.goalieStats.compactMap { $0.player?.playerId }) }
+
+    /// Scorer and assists were on the ice by definition.
+    private var requiredOnIce: Set<PersistentIdentifier> {
+        guard isGoal else { return [] }
+        return Set([selectedPlayerId, assist1Id, assist2Id].compactMap { $0 })
+    }
 
     private var isPenalty: Bool { event.type == "penalty" || event.type == "penaltyAgainst" }
     private var isOurEventWithPlayer: Bool {
@@ -337,6 +362,19 @@ private struct EditEventSheet: View {
                     Toggle("Short-Handed", isOn: $isShortHanded)
                 }
             }
+
+            if isGoalAgainst {
+                Section("Strength") {
+                    Toggle("Power Play (theirs)", isOn: $isPowerPlay)
+                }
+            }
+
+            if isGoal || isGoalAgainst {
+                Section {
+                    OnIcePicker(players: enrolledPlayers, selection: $onIceIDs, required: requiredOnIce, title: "ON ICE")
+                        .padding(.vertical, 4)
+                }
+            }
         }
         .navigationTitle("Edit Event")
         .navigationBarTitleDisplayMode(.inline)
@@ -361,6 +399,8 @@ private struct EditEventSheet: View {
         opponentNumber = event.opponentNumber
         isPowerPlay = event.isPowerPlay
         isShortHanded = event.isShortHanded
+        let recordedIds = Set(event.onIcePlayerIds.split(separator: ",").map(String.init))
+        onIceIDs = Set(enrolledPlayers.filter { recordedIds.contains($0.playerId) }.map(\.persistentModelID))
         selectedPlayerId = enrolledPlayers.first { $0.number == event.playerNumber && $0.name == event.playerName }?.persistentModelID
         assist1Id = enrolledPlayers.first { $0.number == event.assist1Number && $0.name == event.assist1Name }?.persistentModelID
         assist2Id = enrolledPlayers.first { $0.number == event.assist2Number && $0.name == event.assist2Name }?.persistentModelID
@@ -383,6 +423,7 @@ private struct EditEventSheet: View {
 
         if isOurEventWithPlayer, let id = selectedPlayerId,
            let player = enrolledPlayers.first(where: { $0.persistentModelID == id }) {
+            event.playerId = player.playerId
             event.playerName = player.name
             event.playerNumber = player.number
         }
@@ -394,19 +435,29 @@ private struct EditEventSheet: View {
 
         if isGoal {
             if let id = assist1Id, let p = enrolledPlayers.first(where: { $0.persistentModelID == id }) {
+                event.assist1Id = p.playerId
                 event.assist1Name = p.name
                 event.assist1Number = p.number
             } else {
+                event.assist1Id = ""
                 event.assist1Name = ""
                 event.assist1Number = 0
             }
             if let id = assist2Id, let p = enrolledPlayers.first(where: { $0.persistentModelID == id }) {
+                event.assist2Id = p.playerId
                 event.assist2Name = p.name
                 event.assist2Number = p.number
             } else {
+                event.assist2Id = ""
                 event.assist2Name = ""
                 event.assist2Number = 0
             }
+        }
+
+        if isGoal || isGoalAgainst {
+            let chosen = onIceIDs.union(requiredOnIce)
+            let skaterIds = enrolledPlayers.filter { chosen.contains($0.persistentModelID) }.map(\.playerId)
+            event.onIcePlayerIds = event.onIceIds(replacingSkatersWith: skaterIds, goalieIds: goalieIds)
         }
 
         // Apply new stat impact
@@ -433,6 +484,7 @@ enum EventStatAdjuster {
     private static func apply(_ event: GameEvent, game: Game, sign: Int) {
         switch event.type {
         case "goal":
+            adjustPlusMinus(event, game: game, by: sign)
             adjustPlayer(game: game, id: event.playerId, name: event.playerName, number: event.playerNumber) { s in
                 s.goals += sign
                 if event.isPowerPlay { s.powerPlayGoals += sign }
@@ -452,7 +504,6 @@ enum EventStatAdjuster {
                     if event.isShortHanded { s.shortHandedAssists += sign }
                 }
             }
-            adjustPlusMinusForOnIce(event: event, game: game, sign: sign, isForUs: true)
         case "shot":
             adjustPlayer(game: game, id: event.playerId, name: event.playerName, number: event.playerNumber) { $0.shots += sign }
         case "hit":
@@ -468,15 +519,29 @@ enum EventStatAdjuster {
                 $0.penaltyMinutes += sign * event.penaltyMinutes
             }
         case "shotAgainst":
-            adjustGoalie(game: game) { $0.shotsAgainst += sign }
+            adjustGoalie(game: game, event: event) { $0.shotsAgainst += sign }
         case "goalAgainst":
-            adjustGoalie(game: game) {
+            adjustPlusMinus(event, game: game, by: -sign)
+            adjustGoalie(game: game, event: event) {
                 $0.shotsAgainst += sign
                 $0.goalsAgainst += sign
             }
-            adjustPlusMinusForOnIce(event: event, game: game, sign: sign, isForUs: false)
         default:
             break
+        }
+    }
+
+    /// +/- for the skaters stored on the event as on the ice when the goal was
+    /// scored. Power-play goals carry no +/-. The goalie is left out (anyone
+    /// with a goalie line this game), and only existing skater lines change —
+    /// never a new line for someone who wasn't dressed as a skater.
+    private static func adjustPlusMinus(_ event: GameEvent, game: Game, by delta: Int) {
+        guard !event.isPowerPlay, !event.onIcePlayerIds.isEmpty else { return }
+        let goalieIds = Set(game.goalieStats.compactMap { $0.player?.playerId })
+        var seen = Set<String>()
+        for pid in event.onIcePlayerIds.split(separator: ",").map(String.init)
+        where !goalieIds.contains(pid) && seen.insert(pid).inserted {
+            game.playerStats.first { $0.player?.playerId == pid }?.plusMinus += delta
         }
     }
 
@@ -493,30 +558,23 @@ enum EventStatAdjuster {
         }
     }
 
-    private static func adjustGoalie(game: Game, _ change: (GameGoalieStats) -> Void) {
+    /// The goalie a shot-against or goal-against belongs to. Events record the
+    /// goalie in net at the time (so a relief goalie's shots stay theirs);
+    /// older events without one fall back to the starting goalie, then the
+    /// first goalie line.
+    private static func adjustGoalie(game: Game, event: GameEvent, _ change: (GameGoalieStats) -> Void) {
+        if !event.playerId.isEmpty,
+           let stat = game.goalieStats.first(where: { $0.player?.playerId == event.playerId }) {
+            change(stat)
+            return
+        }
+        if let starter = game.startingGoalie,
+           let stat = game.goalieStats.first(where: { $0.player?.persistentModelID == starter.persistentModelID }) {
+            change(stat)
+            return
+        }
         guard let stat = game.goalieStats.first else { return }
         change(stat)
     }
 
-    /// Adjust +/- for the on-ice skaters captured on a goal event. PP goals don't affect +/-.
-    /// The goalie is excluded by matching against any player tied to the game's goalieStats records.
-    private static func adjustPlusMinusForOnIce(event: GameEvent, game: Game, sign: Int, isForUs: Bool) {
-        guard !event.isPowerPlay else { return }
-        guard !event.onIcePlayerIds.isEmpty else { return }
-
-        let onIceIds = event.onIcePlayerIds
-            .split(separator: ",")
-            .map { String($0).trimmingCharacters(in: .whitespaces) }
-            .filter { !$0.isEmpty }
-        guard !onIceIds.isEmpty else { return }
-
-        let goalieIds = Set(game.goalieStats.compactMap { $0.player?.playerId }.filter { !$0.isEmpty })
-        let delta = isForUs ? sign : -sign
-
-        for id in onIceIds where !goalieIds.contains(id) {
-            if let stat = game.playerStats.first(where: { $0.player?.playerId == id }) {
-                stat.plusMinus += delta
-            }
-        }
-    }
 }

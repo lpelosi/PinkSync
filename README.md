@@ -112,8 +112,9 @@ PinkSync/
 3. **Live stat tracking** — tap players to record shots, goals (with assists), hits, blocks, penalties. All events are timestamped with the game clock and tagged with the current period. On-ice players appear first for quick selection, with an expandable bench section for all enrolled players.
 4. **Game clock + penalty clock** — configurable period length, running clock with start/stop/edit, automatic penalty countdown timers with support for concurrent penalties (5-on-3)
 5. **Auto PP/SH detection** — goals scored during a power play or shorthanded situation are automatically flagged. Power play goals clear the opposing team's shortest minor penalty (NHL rules).
-6. **Per-period tracking** — "End Period" buttons advance through 1st → 2nd → 3rd → OT → SO. All stats are recorded per-period with optional clock time for goals and penalties.
-7. **Edit plays** — tap any event in the live feed to edit it (change player, assists, time, type). Undo support for all actions.
+6. **Per-period tracking** — "End Period" buttons advance through 1st → 2nd → 3rd → OT → SO. All stats are recorded per-period with optional clock time for goals and penalties. Every period change can be reversed with a **Go back** button (clock, penalty timers and period restored, plays untouched), and the clock sheet has a period picker for setting 1st / 2nd / 3rd / OT directly.
+7. **Edit plays** — tap any event in the live feed to edit it (change player, assists, time, type). Undo support for all actions, period changes, goalie changes, lineup changes and shootout attempts. Goalie can be changed mid-game (relief goalie), and players can be added to or removed from the lineup after the game has started.
+7a. **Leave and resume, reopen** — the live session (period, clock, penalty timers, lineup, on-ice, shifts, shootout, feed) is written to disk after every change. The live screen can be closed and resumed, survives a crash, and an ended game can be reopened for corrections and ended again. Shootout attempts can be re-assigned to another shooter, flipped between goal and miss/save, or removed; score, round numbers and whose turn it is are re-derived. Both sides' shootout buttons are always live, since the opponent sometimes shoots first.
 8. **Goalie stats** — shots against, goals against, result, shootout rounds
 9. **Line management** — assign players to lines with game positions (C, LW, RW, LD, RD). Supports rolling lines where unassigned players stay on ice during line changes. Faceoffs default to the on-ice center for quick recording, with other players available below.
 10. **Lineup management** — set the game lineup before going live. Only enrolled players appear in the skaters list. Players can be added or removed via the lineup picker; the "Go Live" check-in pre-selects the existing lineup.
@@ -136,7 +137,28 @@ PinkSync/
 - Bouts are scheduled on the website and synced to the app
 - Tapping a scheduled bout creates a game pre-filled with opponent, date, and location
 - Games are linked to their schedule entry via `scheduleId` — completed games are automatically filtered out of the "Upcoming" section
+- Bouts carry a Home/Away flag (`isHome`); away bouts show as "@ Opponent"
 - Schedule management is role-gated (schedule_manager or admin)
+
+### Seasons
+- Seasons come from `GET /api/seasons` (a labelled date range each, one flagged current, optionally with a `playoffsStart` day). Nothing is stamped onto games — the app classifies a game by its date the same way the server does, so a game posted with no season field lands in the right season on both sides.
+- The Games, Roster and Stats tabs each have a season picker, defaulting to the current season, with an "All Seasons" option.
+- Stats are scoped to regular season by default (matching the site's leader cards), with Playoffs and All Games toggles. A player's detail page has the same season picker.
+- Roster membership per season is the server's `seasons` array on each player. The player form has a toggle per season; a new player joins the current season. A player with no membership set belongs to every season, as on the server.
+- Roster edits go through a read-modify-write of `/api/roster/raw`, so one player's save never disturbs anyone else's season membership or stored photo path.
+- **Local fixes are never overwritten.** A game edited on this device after sending (post-game edits, manual stat edits, score/result or goalie changes, lineup changes, reopening, live scoring) is marked as having local edits. Games-tab refresh leaves it alone until it is sent again, and the games list shows an orange icon on it instead of the green check.
+- Sync always pulls every season (`?season=all`) for games, roster and scheduled bouts, so archived games and past players stay on the device; the pickers do the narrowing.
+- Game dates are sent with the device's UTC offset (e.g. `2026-08-14T21:30:00-04:00`), so an evening game stays on the calendar day it was played when the server classifies it by season and playoffs. Games sent before this update keep their UTC timestamp until they are next re-sent.
+- **Franchise Records** (Stats tab) shows the all-time record book from `GET /api/records`.
+- **Admin → Seasons & Playoffs** starts a new season, flags the playoffs (one tap: "Start Playoffs Today"), edits dates, or makes a season current — all through `PUT /api/seasons`.
+
+### Live Score
+- While a game is live, the app pushes the scoreboard (score, shots, period, clock) to `PUT /api/live` at most every 5 seconds and on every play. The website shows it as a banner. Ending the game takes it down; the server also expires it after four hours.
+- **On-ice for goals.** Goal entry, goal-against entry, the live feed editor and Edit Events all share an On Ice picker (`OnIcePicker`). It is pre-filled with the recorded or current skaters, keeps the scorer and assists locked on, and moves +/- when changed. Goals against are editable after the game (time, power play, on ice), and Edit Events lists who was on for each goal.
+- Goalie decisions follow hockey's goalie-of-record rule: on a win the goalie in net for the winning goal, on a loss the goalie who allowed the deciding goal against, in a shootout the goalie who faced it. Other goalies who played get no decision. Goalie changes are stored as `goalieChange` events, and shots against carry the goalie's id.
+
+### Tests
+- `PinkSyncTests` (unit tests, run with ⌘U or `xcodebuild test -scheme PinkSync -destination 'platform=iOS Simulator,name=iPhone 17'`) cover season classification, stat scoping, shootout recomputation, period go-back, live session resume/reopen, and goalie of record. They use an in-memory SwiftData container and never touch the network.
 
 ### Player Photos
 - Photos are synced from the server during roster sync (pull-to-refresh on the Roster tab)
@@ -150,7 +172,7 @@ PinkSync/
 - **Games** — upcoming bouts, active games, create new games, live stat tracking
 - **Roster** — full team roster with player photos, add/edit/remove players, position management (C, LW, RW, LD, RD, Goalie)
 - **History** — completed games with team filter (logos in filter chips), tap for game summary
-- **Stats** — season aggregate tables for skaters and goalies with sortable columns (including jersey number). +/- column is visible only to admins.
+- **Stats** — per-season aggregate tables for skaters and goalies with sortable columns (including jersey number), a regular season / playoffs / all games toggle, a **Pick specific games** filter within that season, and a link to Franchise Records. Players who also play goal appear in both tables. +/- column is visible only to admins.
 
 ### Opponent Teams
 - 7 teams are pre-seeded with logos (Orlando Kraken, Warriors, Wolves, Dangleberry Puckhounds, Whiskey Tangos, Otterhawks, District 5) plus Frozen Flamingos
@@ -187,15 +209,20 @@ The app communicates with an Express.js API server. The server code lives in the
 |--------|----------|-------------|
 | `POST` | `/api/game-stats` | Submit or update game stats (admin) |
 | `DELETE`| `/api/game/:gameId` | Delete a game (admin) |
-| `GET` | `/api/games` | All raw game data (authenticated) |
-| `GET` | `/api/stats` | Aggregated season stats (read key) |
-| `GET` | `/api/roster` | Server roster with active status and photo paths (read key) |
-| `PUT` | `/api/roster` | Replace full roster (roster_manager/admin) |
+| `GET` | `/api/games` | Raw game data; `?season=<id>\|all` (default: current season), `?type=regular\|playoff\|all` (default: all) |
+| `GET` | `/api/stats` | Aggregated stats (read key); same `?season=`, `?type=` defaults to `regular` |
+| `GET` | `/api/seasons` | Season list, oldest first, with `isCurrent` resolved and any `playoffsStart` |
+| `PUT` | `/api/seasons` | Replace the season list — Admin tab: new season, start playoffs, fix dates (admin) |
+| `PUT` | `/api/live` | Push the live scoreboard while scoring (admin); `DELETE /api/live?gameId=` takes it down |
+| `GET` | `/api/records` | All-time franchise records: single season, single game, career, playoffs |
+| `GET` | `/api/roster` | Roster with resolved photo paths; `?season=<id>\|all` (default: current season) |
+| `GET` | `/api/roster/raw` | Roster exactly as stored, no photo resolution or season filter (roster_manager/admin) — the app reads this before every roster write |
+| `PUT` | `/api/roster` | Replace full roster; each player may carry a `seasons` array of season ids (roster_manager/admin) |
 | `POST` | `/api/player-photo` | Upload a player photo (photographer/admin) |
 | `POST` | `/api/team-logo` | Upload an opponent team logo (admin) |
 | `GET` | `/api/team-logos` | Map of uploaded team logos (read key) |
-| `GET` | `/api/schedule` | Scheduled bouts (read key) |
-| `POST` | `/api/schedule` | Add a schedule entry (schedule_manager/admin) |
+| `GET` | `/api/schedule` | Scheduled bouts; same `?season=` / `?type=` handling as `/api/games` |
+| `POST` | `/api/schedule` | Add a schedule entry, optional `isHome` boolean (schedule_manager/admin) |
 | `DELETE`| `/api/schedule/:id` | Remove a schedule entry (schedule_manager/admin) |
 | `GET` | `/api/games/:gameId/mvp-vote` | Admin MVP vote summary with individual ballots (admin) |
 | `GET` | `/api/games/:gameId/mvp-vote-status` | Public MVP vote summary (read key) |

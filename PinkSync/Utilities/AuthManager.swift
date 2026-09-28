@@ -1,6 +1,5 @@
 import AuthenticationServices
 import Foundation
-import LocalAuthentication
 import os
 
 private let logger = Logger(subsystem: "PinkSync", category: "Auth")
@@ -79,31 +78,14 @@ final class AuthManager {
         try saveTokens(access: response.accessToken, refresh: response.refreshToken)
     }
 
-    // MARK: - Biometric Quick-Unlock
-
-    var biometricEnabled: Bool {
-        get { UserDefaults.standard.bool(forKey: "biometricLoginEnabled") }
-        set { UserDefaults.standard.set(newValue, forKey: "biometricLoginEnabled") }
-    }
-
-    func authenticateWithBiometric() async throws {
-        let context = LAContext()
-        var error: NSError?
-        guard context.canEvaluatePolicy(.deviceOwnerAuthenticationWithBiometrics, error: &error) else {
-            throw AuthError.biometricUnavailable
-        }
-        let success = try await context.evaluatePolicy(
-            .deviceOwnerAuthenticationWithBiometrics,
-            localizedReason: "Sign in to PinkSync"
-        )
-        guard success else { throw AuthError.biometricFailed }
-        try await refreshAccessToken()
-    }
-
     // MARK: - Token Refresh
 
     private var refreshTask: Task<String, Error>?
 
+    // Returns a usable access token. Only a refresh the server explicitly
+    // rejects (401) ends the session; a network blip, timeout, or 5xx keeps
+    // the user signed in and hands back the current token so the request can
+    // fail on its own terms (SyncManager queues and retries anyway).
     func refreshTokenIfNeeded() async throws -> String {
         if let existing = refreshTask {
             return try await existing.value
@@ -114,14 +96,20 @@ final class AuthManager {
             throw AuthError.notAuthenticated
         }
 
-        if !isTokenExpiringSoon(accessToken) {
+        if !Self.isTokenExpiringSoon(accessToken) {
             return accessToken
         }
 
         let task = Task<String, Error> {
             defer { refreshTask = nil }
-            let newToken = try await refreshAccessToken()
-            return newToken
+            do {
+                return try await refreshAccessToken()
+            } catch AuthError.sessionExpired {
+                throw AuthError.sessionExpired
+            } catch {
+                logger.warning("Token refresh failed transiently, reusing current token: \(error.localizedDescription)")
+                return accessToken
+            }
         }
         refreshTask = task
         return try await task.value
@@ -131,17 +119,16 @@ final class AuthManager {
     private func refreshAccessToken() async throws -> String {
         guard let refreshData = KeychainHelper.load(key: "refreshToken"),
               let refreshToken = String(data: refreshData, encoding: .utf8) else {
-            logout()
             throw AuthError.notAuthenticated
         }
 
         do {
             let response = try await APIClient.refreshToken(refreshToken: refreshToken)
-            try saveTokens(access: response.accessToken, refresh: response.refreshToken)
             currentUser = response.user
+            try saveTokens(access: response.accessToken, refresh: response.refreshToken)
             return response.accessToken
-        } catch {
-            logger.error("Token refresh failed: \(error.localizedDescription)")
+        } catch APIClient.AuthAPIError.refreshRejected {
+            logger.error("Refresh token rejected by server, signing out")
             logout()
             throw AuthError.sessionExpired
         }
@@ -154,7 +141,6 @@ final class AuthManager {
         KeychainHelper.delete(key: "accessToken")
         KeychainHelper.delete(key: "refreshToken")
         KeychainHelper.delete(key: "currentUser")
-        biometricEnabled = false
         currentUser = nil
     }
 
@@ -182,13 +168,16 @@ final class AuthManager {
             return
         }
 
+        // Trust the stored session immediately; a refresh only signs the user
+        // out if the server says the token is no longer valid.
         currentUser = user
 
         do {
             try await refreshAccessToken()
+        } catch AuthError.sessionExpired {
+            logger.info("Stored session rejected by server, requiring login")
         } catch {
-            logger.info("Session restore failed, requiring login")
-            currentUser = nil
+            logger.info("Session restore refresh skipped (offline?), staying signed in")
         }
     }
 
@@ -203,21 +192,29 @@ final class AuthManager {
         }
     }
 
-    private func isTokenExpiringSoon(_ token: String) -> Bool {
+    // JWT segments are base64url (`-` and `_`, no padding), which
+    // `Data(base64Encoded:)` rejects. Decoding failure used to be treated as
+    // "expired", which made the app refresh on every request.
+    static func isTokenExpiringSoon(_ token: String, now: Date = Date()) -> Bool {
         let parts = token.split(separator: ".")
         guard parts.count == 3,
-              let payloadData = Data(base64Encoded: padBase64(String(parts[1]))),
+              let payloadData = decodeBase64URL(String(parts[1])),
               let json = try? JSONSerialization.jsonObject(with: payloadData) as? [String: Any],
               let exp = json["exp"] as? TimeInterval else {
             return true
         }
-        return Date(timeIntervalSince1970: exp).timeIntervalSinceNow < 60
+        return Date(timeIntervalSince1970: exp).timeIntervalSince(now) < 60
     }
 
-    private func padBase64(_ string: String) -> String {
-        let remainder = string.count % 4
-        if remainder == 0 { return string }
-        return string + String(repeating: "=", count: 4 - remainder)
+    static func decodeBase64URL(_ string: String) -> Data? {
+        var base64 = string
+            .replacingOccurrences(of: "-", with: "+")
+            .replacingOccurrences(of: "_", with: "/")
+        let remainder = base64.count % 4
+        if remainder != 0 {
+            base64 += String(repeating: "=", count: 4 - remainder)
+        }
+        return Data(base64Encoded: base64)
     }
 
     // MARK: - Errors
@@ -225,16 +222,12 @@ final class AuthManager {
     enum AuthError: LocalizedError {
         case notAuthenticated
         case sessionExpired
-        case biometricUnavailable
-        case biometricFailed
         case appleSignInFailed
 
         var errorDescription: String? {
             switch self {
             case .notAuthenticated: return "Not signed in."
             case .sessionExpired: return "Session expired. Please sign in again."
-            case .biometricUnavailable: return "Biometric authentication is not available."
-            case .biometricFailed: return "Biometric authentication failed."
             case .appleSignInFailed: return "Sign in with Apple failed. Please try again."
             }
         }

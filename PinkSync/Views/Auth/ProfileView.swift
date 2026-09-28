@@ -36,15 +36,6 @@ struct ProfileView: View {
                 }
 
                 Section {
-                    Toggle("Face ID Quick Sign-In", isOn: Binding(
-                        get: { authManager.biometricEnabled },
-                        set: { authManager.biometricEnabled = $0 }
-                    ))
-                } header: {
-                    Text("Security")
-                }
-
-                Section {
                     Button("Sign Out", role: .destructive) {
                         authManager.logout()
                     }

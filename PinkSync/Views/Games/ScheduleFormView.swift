@@ -3,11 +3,15 @@ import SwiftData
 
 struct ScheduleFormView: View {
     @Environment(\.dismiss) private var dismiss
+    @Environment(TournamentStore.self) private var tournamentStore
     @Query(sort: \OpponentTeam.name) private var savedTeams: [OpponentTeam]
 
     @State private var date = Date()
     @State private var time = ""
     @State private var location = ""
+    @State private var isHome = true
+    /// "" for a league bout.
+    @State private var tournamentId = ""
     @State private var opponent = ""
     @State private var selectedTeamID: PersistentIdentifier?
     @State private var useCustomOpponent = false
@@ -31,6 +35,19 @@ struct ScheduleFormView: View {
                 DatePicker("Date", selection: $date, displayedComponents: .date)
                 TextField("Time (e.g. 9:00 PM)", text: $time)
                 TextField("Location", text: $location)
+                Picker("Venue", selection: $isHome) {
+                    Text("Home").tag(true)
+                    Text("Away").tag(false)
+                }
+                .pickerStyle(.segmented)
+                if !tournamentStore.tournaments.isEmpty {
+                    Picker("Tournament", selection: $tournamentId) {
+                        Text("None").tag("")
+                        ForEach(tournamentStore.newestFirst) { tournament in
+                            Text(tournament.title).tag(tournament.id)
+                        }
+                    }
+                }
             }
 
             Section("Opponent") {
@@ -144,7 +161,9 @@ struct ScheduleFormView: View {
                 date: dateString,
                 opponent: resolvedOpponent,
                 location: location,
-                time: time
+                time: time,
+                isHome: isHome,
+                tournamentId: tournamentId.isEmpty ? nil : tournamentId
             )
             onSaved?(entry)
             await MainActor.run { dismiss() }

@@ -83,6 +83,32 @@ struct AdminView: View {
                 }
             }
 
+            // Seasons
+            Section {
+                NavigationLink {
+                    SeasonAdminView()
+                } label: {
+                    Label("Seasons & Playoffs", systemImage: "calendar.badge.clock")
+                }
+            } header: {
+                Text("Seasons")
+            } footer: {
+                Text("Start a new season, flag the playoffs, or fix season dates. Changes apply to the website immediately.")
+            }
+
+            // Tournaments
+            Section {
+                NavigationLink {
+                    TournamentAdminView()
+                } label: {
+                    Label("Tournaments", systemImage: "trophy")
+                }
+            } header: {
+                Text("Tournaments")
+            } footer: {
+                Text("Book a tournament and set who is travelling. Its games are kept out of the season stats.")
+            }
+
             // User Management
             Section {
                 NavigationLink {
@@ -192,6 +218,7 @@ struct AdminView: View {
         }
 
         // Delete locally
+        LiveSessionStore.delete(gameId: game.gameId)
         modelContext.delete(game)
         try? modelContext.save()
     }
@@ -213,6 +240,7 @@ struct AdminView: View {
 
         // Delete all locally regardless of server result
         for game in games {
+            LiveSessionStore.delete(gameId: game.gameId)
             modelContext.delete(game)
         }
         try? modelContext.save()

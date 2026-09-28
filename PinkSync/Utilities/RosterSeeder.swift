@@ -56,7 +56,7 @@ enum RosterSeeder {
         let existingTeams = (try? modelContext.fetch(descriptor)) ?? []
 
         if existingTeams.isEmpty {
-            let team = Team(name: "Frozen Flamingos", abbreviation: "FF", season: "2026")
+            let team = Team(name: "Frozen Flamingos", abbreviation: "FF")
             modelContext.insert(team)
 
             for data in rosterData {
