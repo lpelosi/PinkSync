@@ -897,6 +897,7 @@ final class LiveGameViewModel: Identifiable {
     /// against that did not go in is a save by the goalie stamped on it.
     private static let announcedPlays = [
         "goal": "goal",
+        "shot": "shot",
         "shotAgainst": "save",
         "block": "block",
         "hit": "hit",

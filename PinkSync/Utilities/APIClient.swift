@@ -723,7 +723,7 @@ enum APIClient {
 
         /// Unique per play, so the website shows each one once.
         let id: String
-        /// "goal", "save", "block", "hit" or "penalty".
+        /// "goal", "shot", "save", "block", "hit" or "penalty".
         let type: String
         let playerId: String
         let playerName: String
