@@ -35,7 +35,8 @@ struct GameDetailView: View {
     @State private var showingReopenConfirm = false
 
     private var goalies: [Player] {
-        allPlayers.filter { $0.isGoalie }
+        tournamentStore.goalieChoices(tournamentId: game.tournamentId, from: allPlayers)
+            ?? allPlayers.filter { $0.isGoalie }
     }
 
     /// Roster players who can be in this game's lineup: active members of the

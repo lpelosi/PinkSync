@@ -347,15 +347,21 @@ struct StatsTable {
                 onRoster = seasonId == Season.allId || player.isMember(of: seasonId)
             }
 
+            // A tournament that names its goalies lists them as goalies and
+            // everyone else as skaters. Whoever actually played the other
+            // role still gets that line, so no stat is ever hidden.
+            let listedSkater = tournament?.listsAsSkater(player) ?? true
+            let listedGoalie = tournament?.listsAsGoalie(player) ?? true
+
             if player.position != Position.goalie.rawValue {
                 let played = !totals.gameStats.isEmpty
-                if picking ? played : (onRoster || played) {
+                if picking ? played : ((onRoster && listedSkater) || played) {
                     skaters.append(Row(player: player, totals: totals))
                 }
             }
             if player.isGoalie || !player.goalieGameStats.isEmpty {
                 let played = !totals.goalieGameStats.isEmpty
-                if picking ? played : (onRoster || played) {
+                if picking ? played : ((onRoster && listedGoalie) || played) {
                     goalies.append(Row(player: player, totals: totals))
                 }
             }

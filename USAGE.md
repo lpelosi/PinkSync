@@ -393,6 +393,7 @@ To manage roles:
 
 - **Book a Tournament** — name, first and last day, location and division.
 - **Travel Roster** — tick who is going, or start from **Select the Season Roster** and untick. Only these players are offered for the tournament's lineups and shown on its roster and stats. A pickup has to be added on the Roster tab first. With nobody ticked, the roster is whoever plays.
+- **Goalies** — in the same menu, tick **Goalie at This Tournament** for whoever is actually in net. Several skaters can play goal and the league roster lists them all as goalies; once a tournament names its goalies, only those are listed as goalies on its roster and stats, and everyone else is listed as a skater. Anyone travelling who can play goal can still be put in net for a game.
 - **Captain and alternates** — tap the box to the right of a travelling player and pick **Captain** or **Alternate**. There is one captain; naming a new one moves the C. Letters are kept for that tournament only, so each trip has its own record, and they show next to the name on the website and on the Roster tab.
 - **Add its games** from the Games tab with **Schedule Bout**, picking the tournament on each. Add the final the same way once the team is in it.
 - **Seeing its numbers** — the season picker on the Games, Roster and Stats tabs lists tournaments under the seasons.

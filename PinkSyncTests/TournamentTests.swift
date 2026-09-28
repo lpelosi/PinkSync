@@ -142,8 +142,10 @@ final class TournamentTests: XCTestCase {
         stored.roster = ["AAA", "BBB", "CCC"]
         stored.captain = "aaa"
         stored.alternates = ["BBB"]
+        stored.goalies = ["bbb", "CCC"]
         var draft = TournamentDraft(tournament: stored)
         XCTAssertEqual(draft.letters, ["AAA": .captain, "BBB": .alternate])
+        XCTAssertEqual(draft.goalies, ["BBB", "CCC"])
 
         // Naming a new captain takes the C from the old one.
         draft.setLetter(.captain, for: "CCC")
@@ -155,6 +157,7 @@ final class TournamentTests: XCTestCase {
         XCTAssertEqual(saved.roster, ["AAA", "CCC"])
         XCTAssertEqual(saved.captain, "CCC")
         XCTAssertNil(saved.alternates)
+        XCTAssertEqual(saved.goalies, ["CCC"], "leaving the roster gives up the net too")
         XCTAssertEqual(saved.id, classic.id)
     }
 
@@ -163,10 +166,82 @@ final class TournamentTests: XCTestCase {
         stored.roster = ["AAA", "BBB"]
         stored.captain = "AAA"
         stored.alternates = ["BBB"]
+        stored.goalies = ["BBB"]
 
         let decoded = try JSONDecoder().decode(Tournament.self, from: JSONEncoder().encode(stored))
         XCTAssertEqual(decoded.captain, "AAA")
         XCTAssertEqual(decoded.alternates, ["BBB"])
+        XCTAssertEqual(decoded.goalies, ["BBB"])
+    }
+
+    func testOnlyNamedGoaliesAreListedAsGoalies() throws {
+        let container = try TestSupport.makeContainer()
+        let context = container.mainContext
+        // A forward and a defenseman who can both play goal, like the league
+        // roster has them, and a goalie by position who stayed home.
+        let starter = TestSupport.player("Starter", number: 24, in: context)
+        starter.isGoalie = true
+        let fillIn = TestSupport.player("Fill In", number: 4, in: context)
+        fillIn.position = "Defense"
+        fillIn.isGoalie = true
+        let skater = TestSupport.player("Skater", number: 7, in: context)
+        let atHome = TestSupport.player("At Home", number: 41, goalie: true, in: context)
+        let everyone = [starter, fillIn, skater, atHome]
+
+        var named = classic
+        named.roster = [starter, fillIn, skater].map(\.playerId)
+        named.goalies = [starter.playerId.lowercased()]
+
+        XCTAssertTrue(named.listsAsGoalie(starter))
+        XCTAssertFalse(named.listsAsSkater(starter))
+        XCTAssertFalse(named.listsAsGoalie(fillIn))
+        XCTAssertTrue(named.listsAsSkater(fillIn))
+        XCTAssertTrue(named.listsAsSkater(skater))
+
+        // Putting someone in net for a game is a different question: the
+        // named goalie comes first, the fill-in is still there, and nobody
+        // who stayed home is offered.
+        XCTAssertEqual(named.goalieChoices(from: everyone).map(\.name), ["Starter", "Fill In"])
+
+        // With no goalies named, the team roster's flags stand.
+        var unnamed = named
+        unnamed.goalies = nil
+        XCTAssertTrue(unnamed.listsAsGoalie(fillIn))
+        XCTAssertTrue(unnamed.listsAsSkater(fillIn))
+
+        let store = TournamentStore(tournaments: [named])
+        XCTAssertEqual(store.goalieChoices(tournamentId: classic.id, from: everyone)?.map(\.name), ["Starter", "Fill In"])
+        XCTAssertNil(store.goalieChoices(tournamentId: "", from: everyone), "a league game keeps the season rule")
+    }
+
+    func testStatsTableFollowsTheTournamentsGoalies() throws {
+        let container = try TestSupport.makeContainer()
+        let context = container.mainContext
+        let starter = TestSupport.player("Starter", number: 24, in: context)
+        starter.isGoalie = true
+        let fillIn = TestSupport.player("Fill In", number: 4, in: context)
+        fillIn.isGoalie = true
+
+        var named = classic
+        named.roster = [starter.playerId, fillIn.playerId]
+        named.goalies = [starter.playerId]
+        let scope = StatScope(season: nil, type: nil, seasons: seasons, tournamentId: classic.id)
+
+        let table = StatsTable(players: [starter, fillIn], scope: scope, seasonId: named.selectionId, selectedGames: [], tournament: named)
+        XCTAssertEqual(table.goalies.map(\.player.name), ["Starter"])
+        XCTAssertEqual(table.skaters.map(\.player.name), ["Fill In"])
+
+        // The fill-in ends up in net for a game: that line is never hidden.
+        let game = TestSupport.game(date: TestSupport.day("2026-10-03"), in: context)
+        game.tournamentId = classic.id
+        let line = GameGoalieStats(shotsAgainst: 20, goalsAgainst: 2, result: "W")
+        line.player = fillIn
+        line.game = game
+        context.insert(line)
+        try context.save()
+
+        let after = StatsTable(players: [starter, fillIn], scope: scope, seasonId: named.selectionId, selectedGames: [], tournament: named)
+        XCTAssertEqual(after.goalies.map(\.player.name).sorted(), ["Fill In", "Starter"])
     }
 
     func testABoutIsOnlyHiddenByItsOwnGame() {

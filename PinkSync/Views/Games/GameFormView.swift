@@ -27,11 +27,8 @@ struct GameFormView: View {
     /// Goalies on the travel roster for a tournament game, otherwise on the
     /// roster for the season the chosen date falls in.
     private var goalies: [Player] {
-        allPlayers.filter { player in
-            player.isGoalie
-                && (tournamentStore.rosterDecision(for: player, tournamentId: tournamentId)
-                    ?? seasonStore.isOnRoster(player, on: date))
-        }
+        tournamentStore.goalieChoices(tournamentId: tournamentId, from: allPlayers)
+            ?? allPlayers.filter { $0.isGoalie && seasonStore.isOnRoster($0, on: date) }
     }
 
     private var selectedTeam: OpponentTeam? {

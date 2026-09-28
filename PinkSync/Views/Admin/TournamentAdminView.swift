@@ -122,6 +122,9 @@ struct TournamentDraft: Identifiable {
     var roster: Set<String>
     /// Who wears a letter, by player id. Only players on the roster.
     var letters: [String: Letter]
+    /// The goalies the team is bringing, by player id. Empty leaves it to the
+    /// team roster's own goalie flags.
+    var goalies: Set<String>
 
     init(tournament: Tournament) {
         id = tournament.id
@@ -141,6 +144,7 @@ struct TournamentDraft: Identifiable {
             letters[captain.uppercased()] = .captain
         }
         self.letters = letters
+        goalies = Set((tournament.goalies ?? []).map { $0.uppercased() })
     }
 
     /// Give a player a letter, or take it away with nil. There is one
@@ -160,6 +164,7 @@ struct TournamentDraft: Identifiable {
         if roster.contains(playerId) {
             roster.remove(playerId)
             letters[playerId] = nil
+            goalies.remove(playerId)
         } else {
             roster.insert(playerId)
         }
@@ -184,6 +189,7 @@ struct TournamentDraft: Identifiable {
         url = nil
         roster = []
         letters = [:]
+        goalies = []
     }
 
     /// A URL-safe id from the label and the year, unique among `existing`.
@@ -209,6 +215,7 @@ struct TournamentDraft: Identifiable {
         let trimmedDivision = division.trimmingCharacters(in: .whitespaces)
         let worn = letters.filter { roster.contains($0.key) }
         let alternates = worn.filter { $0.value == .alternate }.keys.sorted()
+        let inNet = goalies.filter { roster.contains($0) }.sorted()
         return Tournament(
             id: resolvedId(existing: existing),
             label: label.trimmingCharacters(in: .whitespaces),
@@ -219,7 +226,8 @@ struct TournamentDraft: Identifiable {
             url: url,
             roster: roster.isEmpty ? nil : roster.sorted(),
             captain: worn.first { $0.value == .captain }?.key,
-            alternates: alternates.isEmpty ? nil : alternates
+            alternates: alternates.isEmpty ? nil : alternates,
+            goalies: inNet.isEmpty ? nil : inNet
         )
     }
 }
@@ -270,10 +278,12 @@ private struct TournamentFormView: View {
                 Button("Select the Season Roster") {
                     draft.roster = seasonRosterIds
                     draft.letters = draft.letters.filter { seasonRosterIds.contains($0.key) }
+                    draft.goalies = draft.goalies.intersection(seasonRosterIds)
                 }
                 Button("Clear", role: .destructive) {
                     draft.roster.removeAll()
                     draft.letters.removeAll()
+                    draft.goalies.removeAll()
                 }
                 .disabled(draft.roster.isEmpty)
 
@@ -295,6 +305,14 @@ private struct TournamentFormView: View {
                         Spacer()
 
                         if travelling {
+                            if draft.goalies.contains(playerId) {
+                                Text("G")
+                                    .font(.system(size: 13, weight: .heavy, design: .rounded))
+                                    .foregroundStyle(.white)
+                                    .frame(width: 24, height: 24)
+                                    .background(AppTheme.pink, in: RoundedRectangle(cornerRadius: 5))
+                                    .accessibilityLabel("Goalie at this tournament")
+                            }
                             letterMenu(for: playerId, name: player.name)
                         }
                     }
@@ -302,7 +320,7 @@ private struct TournamentFormView: View {
             } header: {
                 Text("Travel Roster (\(draft.roster.count))")
             } footer: {
-                Text("Only these players are offered for the tournament's lineups, and only they appear on its roster and stats pages. A pickup has to be added on the Roster tab first. With nobody selected, the roster is whoever plays.\n\nTap the letter next to a travelling player to name the captain (C) and the alternates (A). They are kept for this tournament only.")
+                Text("Only these players are offered for the tournament's lineups, and only they appear on its roster and stats pages. A pickup has to be added on the Roster tab first. With nobody selected, the roster is whoever plays.\n\nTap the box next to a travelling player to name the captain (C), the alternates (A) and the goalies (G). They are kept for this tournament only. Once a goalie is named, only named goalies are listed as goalies for the tournament; everyone else is listed as a skater, and can still be put in net for a game.")
             }
 
             if !draft.isNew {
@@ -357,10 +375,24 @@ private struct TournamentFormView: View {
                     draft.setLetter(nil, for: playerId)
                 }
             }
+            Divider()
+            Button {
+                if draft.goalies.contains(playerId) {
+                    draft.goalies.remove(playerId)
+                } else {
+                    draft.goalies.insert(playerId)
+                }
+            } label: {
+                if draft.goalies.contains(playerId) {
+                    Label("Goalie at This Tournament", systemImage: "checkmark")
+                } else {
+                    Text("Goalie at This Tournament")
+                }
+            }
         } label: {
             LetterBadge(letter: held)
         }
-        .accessibilityLabel(held.map { "\(name), \($0.label). Change letter." } ?? "\(name), no letter. Give a letter.")
+        .accessibilityLabel(held.map { "\(name), \($0.label). Change letter or goalie." } ?? "\(name), no letter. Give a letter or name as goalie.")
     }
 
     private func save() async {

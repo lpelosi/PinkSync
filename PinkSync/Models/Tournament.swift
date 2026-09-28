@@ -24,6 +24,9 @@ struct Tournament: Codable, Identifiable, Hashable, Sendable {
     var captain: String?
     /// Player ids of the alternate captains for this tournament.
     var alternates: [String]?
+    /// Player ids of the goalies the team brought. Nil or empty means the
+    /// team roster's own goalie flags apply.
+    var goalies: [String]?
 
     /// Added by the server on read (`upcoming`, `in-progress`, `complete`);
     /// ignored by it on write.
@@ -56,6 +59,48 @@ struct Tournament: Codable, Identifiable, Hashable, Sendable {
         }
         return player.gameStats.contains { $0.game?.tournamentId == id }
             || player.goalieGameStats.contains { $0.game?.tournamentId == id }
+    }
+}
+
+// MARK: - Goalies
+
+extension Tournament {
+    var namesGoalies: Bool {
+        !(goalies ?? []).isEmpty
+    }
+
+    /// Whether a player is one of the goalies named for this tournament.
+    func isNamedGoalie(_ player: Player) -> Bool {
+        let id = player.playerId.uppercased()
+        guard !id.isEmpty else { return false }
+        return (goalies ?? []).contains { $0.uppercased() == id }
+    }
+
+    /// Whether a player is listed as a goalie at this tournament. Several
+    /// skaters on the team can play goal and the league roster lists them all
+    /// as goalies; a tournament that names its goalies lists those and nobody
+    /// else. A player whose position is Goalie stays one either way. Matches
+    /// `playerAtTournament` on the server.
+    func listsAsGoalie(_ player: Player) -> Bool {
+        guard namesGoalies else { return player.isGoalie }
+        return isNamedGoalie(player) || player.position == Position.goalie.rawValue
+    }
+
+    /// Whether a player is listed as a skater at this tournament: everyone
+    /// but its goalies.
+    func listsAsSkater(_ player: Player) -> Bool {
+        guard namesGoalies else { return player.position != Position.goalie.rawValue }
+        return !listsAsGoalie(player)
+    }
+
+    /// Who can be put in net for one of this tournament's games, the named
+    /// goalies first. Anyone travelling who can play goal stays available:
+    /// the starter can get hurt.
+    func goalieChoices(from players: [Player]) -> [Player] {
+        let travelling = players.filter { $0.isActive && (!hasRoster || isOnRoster($0)) }
+        let named = travelling.filter { isNamedGoalie($0) }
+        let others = travelling.filter { $0.isGoalie && !isNamedGoalie($0) }
+        return named + others
     }
 }
 

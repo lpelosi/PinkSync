@@ -72,6 +72,15 @@ final class TournamentStore {
         return tournament.isOnRoster(player)
     }
 
+    /// The goalies to offer for a game. For a tournament game that is the
+    /// travel roster's goalies, the named ones first; nil for a league game,
+    /// where the caller's own season rule applies.
+    func goalieChoices(tournamentId: String, from players: [Player]) -> [Player]? {
+        guard let tournament = tournament(id: tournamentId),
+              tournament.hasRoster || tournament.namesGoalies else { return nil }
+        return tournament.goalieChoices(from: players)
+    }
+
     private static func cached() -> [Tournament] {
         guard let data = UserDefaults.standard.data(forKey: cacheKey),
               let tournaments = try? JSONDecoder().decode([Tournament].self, from: data) else { return [] }

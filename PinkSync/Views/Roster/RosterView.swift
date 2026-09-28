@@ -33,15 +33,22 @@ struct RosterView: View {
         return players.filter { $0.isMember(of: selectedSeasonId) }
     }
 
+    private var selectedTournament: Tournament? {
+        tournamentStore.tournament(forSelection: selectedSeasonId)
+    }
+
     private var skaters: [Player] {
-        visiblePlayers.filter { !$0.isGoalie }
+        if let tournament = selectedTournament, tournament.namesGoalies {
+            return visiblePlayers.filter { tournament.listsAsSkater($0) }
+        }
+        return visiblePlayers.filter { !$0.isGoalie }
     }
 
     /// A roster row, with the player's letter when a tournament is being
     /// viewed. Letters are per tournament, so a season roster shows none.
     @ViewBuilder
     private func row(_ player: Player) -> some View {
-        if let letter = tournamentStore.tournament(forSelection: selectedSeasonId)?.letter(for: player) {
+        if let letter = selectedTournament?.letter(for: player) {
             HStack {
                 PlayerRow(player: player)
                 Spacer()
@@ -53,7 +60,10 @@ struct RosterView: View {
     }
 
     private var goalies: [Player] {
-        visiblePlayers.filter { $0.isGoalie }
+        if let tournament = selectedTournament, tournament.namesGoalies {
+            return visiblePlayers.filter { tournament.listsAsGoalie($0) }
+        }
+        return visiblePlayers.filter { $0.isGoalie }
     }
 
     var body: some View {
