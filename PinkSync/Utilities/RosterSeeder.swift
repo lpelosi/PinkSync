@@ -19,7 +19,6 @@ enum RosterSeeder {
         PlayerData(playerId: "C76CF8B2-EB8B-4FE3-99BC-B51B58B9A326", name: "Jordan 'Jordaddy' Jacobson", number: 64, position: "Defense", isGoalie: true),
 
         // Defense
-        PlayerData(playerId: "FB343F79-1594-4AA2-B321-B29C4750BBC2", name: "Nick Mills", number: 1, position: "Defense", isGoalie: false),
         PlayerData(playerId: "73287971-1EFF-4D02-95CE-293BC6408486", name: "Sela 'Tequila' Dieden", number: 4, position: "Defense", isGoalie: false),
         PlayerData(playerId: "0415A42B-4737-4B7F-A198-311BDE6D9C55", name: "Matthew 'Fingerz' Valerio", number: 9, position: "Defense", isGoalie: false),
         PlayerData(playerId: "9B35CD9F-EB07-4730-8784-E88871DAA7CE", name: "Ryan Yates", number: 70, position: "Defense", isGoalie: false),
