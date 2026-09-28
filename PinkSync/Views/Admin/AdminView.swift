@@ -19,6 +19,10 @@ struct AdminView: View {
 
     @State private var showUserManagement = false
 
+    @State private var isClearingLive = false
+    @State private var liveClearResult: String?
+    @State private var showLiveClearResult = false
+
     var body: some View {
         adminContent
             .navigationTitle("Admin")
@@ -143,6 +147,27 @@ struct AdminView: View {
                 }
             }
 
+            // Live banner
+            Section {
+                Button {
+                    Task { await takeDownLiveBanner() }
+                } label: {
+                    HStack {
+                        if isClearingLive {
+                            ProgressView()
+                        } else {
+                            Image(systemName: "dot.radiowaves.left.and.right")
+                        }
+                        Text("Take Down Live Banner")
+                    }
+                }
+                .disabled(isClearingLive)
+            } header: {
+                Text("Website")
+            } footer: {
+                Text("Removes the live score from the website. Use it when a game shows as live that is not being played. Scoring a game puts the banner back up.")
+            }
+
             // Delete All
             Section {
                 Button(role: .destructive) {
@@ -195,12 +220,31 @@ struct AdminView: View {
         } message: {
             Text(deleteResult ?? "Games deleted.")
         }
+        .alert("Live Banner", isPresented: $showLiveClearResult) {
+            Button("OK") {}
+        } message: {
+            Text(liveClearResult ?? "")
+        }
         // Error
         .alert("Delete Error", isPresented: $showDeleteError) {
             Button("OK") {}
         } message: {
             Text(deleteError ?? "An error occurred.")
         }
+    }
+
+    // MARK: - Live Banner
+
+    private func takeDownLiveBanner() async {
+        isClearingLive = true
+        do {
+            try await APIClient.clearLiveScore()
+            liveClearResult = "The website is no longer showing a live game."
+        } catch {
+            liveClearResult = "The banner could not be taken down: \(error.localizedDescription)"
+        }
+        isClearingLive = false
+        showLiveClearResult = true
     }
 
     // MARK: - Deletion
@@ -219,6 +263,7 @@ struct AdminView: View {
 
         // Delete locally
         LiveSessionStore.delete(gameId: game.gameId)
+        APIClient.takeDownLiveScore(for: game.gameId)
         modelContext.delete(game)
         try? modelContext.save()
     }
@@ -244,6 +289,8 @@ struct AdminView: View {
             modelContext.delete(game)
         }
         try? modelContext.save()
+        // No game is left to be live.
+        try? await APIClient.clearLiveScore()
 
         isDeleting = false
 

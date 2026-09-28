@@ -1146,7 +1146,7 @@ private struct LineSetupSheet: View {
         NavigationStack {
             List {
                 Section {
-                    Text("Assign positions, then lines. Swipe a player to move them to the other group for this game only — their roster position is unchanged. Players without a line will stay on ice during line changes (rolling).")
+                    Text("Assign positions, then lines. Swipe a player to move them to the other group for this game only — their roster position is unchanged. Players without a line will stay on ice during line changes (rolling). Lines can be changed at any point in the game.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -1244,7 +1244,7 @@ private struct LineSetupSheet: View {
                 }
 
             }
-            .navigationTitle("Set Up Lines")
+            .navigationTitle(vm.gameUnderway ? "Lines" : "Set Up Lines")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
@@ -1267,26 +1267,14 @@ private struct LineSetupSheet: View {
     private func lineBinding(for player: Player) -> Binding<String> {
         Binding(
             get: { vm.playerLines[player.persistentModelID] ?? "" },
-            set: { newValue in
-                if newValue.isEmpty {
-                    vm.playerLines.removeValue(forKey: player.persistentModelID)
-                } else {
-                    vm.playerLines[player.persistentModelID] = newValue
-                }
-            }
+            set: { vm.changeLine(of: player, to: $0) }
         )
     }
 
     private func positionBinding(for player: Player) -> Binding<String> {
         Binding(
             get: { vm.playerGamePosition[player.persistentModelID] ?? "" },
-            set: { newValue in
-                if newValue.isEmpty {
-                    vm.playerGamePosition.removeValue(forKey: player.persistentModelID)
-                } else {
-                    vm.playerGamePosition[player.persistentModelID] = newValue
-                }
-            }
+            set: { vm.setGamePosition($0, for: player) }
         )
     }
 }
@@ -2047,8 +2035,68 @@ private struct OnIceManagerSheet: View {
         }
     }
 
-    /// Mid-game lineup fixes: relief goalie, late arrival, someone checked in
-    /// by mistake.
+    /// One skater's line, as a menu of every line and pairing. Picking a
+    /// pairing moves a forward to defense, and the other way round.
+    private func lineMenu(for player: Player) -> some View {
+        let current = vm.playerLines[player.persistentModelID]
+        let isForward = vm.isForwardForGame(player)
+        return Menu {
+            Section("Forward lines") {
+                ForEach(LiveGameViewModel.forwardLines, id: \.self) { line in
+                    lineChoice("Line \(line.dropFirst())", isCurrent: current == line) {
+                        vm.changeLine(of: player, to: line)
+                    }
+                }
+                lineChoice("Forward, no line", isCurrent: isForward && current == nil) {
+                    vm.changeLine(of: player, to: nil, role: "Forward")
+                }
+            }
+            Section("Defense pairings") {
+                ForEach(LiveGameViewModel.defensePairings, id: \.self) { line in
+                    lineChoice("Pairing \(line.dropFirst())", isCurrent: current == line) {
+                        vm.changeLine(of: player, to: line)
+                    }
+                }
+                lineChoice("Defense, no pairing", isCurrent: !isForward && current == nil) {
+                    vm.changeLine(of: player, to: nil, role: "Defense")
+                }
+            }
+        } label: {
+            HStack(spacing: 8) {
+                Text("\(vm.displayNumber(for: player)) \(player.name)")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.primary)
+                    .lineLimit(1)
+                Spacer()
+                Text(vm.lineSummary(for: player))
+                    .font(.system(.subheadline, design: .monospaced, weight: .bold))
+                    .foregroundStyle(.white)
+                    .frame(minWidth: 36)
+                    .padding(.vertical, 4)
+                    .padding(.horizontal, 6)
+                    .background(isForward ? AppTheme.pink : AppTheme.teal, in: Capsule())
+                Image(systemName: "chevron.up.chevron.down")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            .frame(minHeight: 44)
+            .contentShape(Rectangle())
+        }
+    }
+
+    @ViewBuilder
+    private func lineChoice(_ title: String, isCurrent: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            if isCurrent {
+                Label(title, systemImage: "checkmark")
+            } else {
+                Text(title)
+            }
+        }
+    }
+
+    /// Mid-game lineup fixes: relief goalie, line changes, late arrival,
+    /// someone checked in by mistake.
     private var lineupSections: some View {
         VStack(alignment: .leading, spacing: 20) {
             VStack(alignment: .leading, spacing: 8) {
@@ -2072,6 +2120,20 @@ private struct OnIceManagerSheet: View {
                                 .font(.subheadline.weight(.semibold))
                         }
                         .foregroundStyle(AppTheme.pink)
+                    }
+                }
+            }
+
+            if !vm.skaters.isEmpty {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("LINES")
+                        .font(AppTheme.statLabel)
+                        .foregroundStyle(.secondary)
+                    Text("Move a skater to another line, or between forward and defense. Ice time and shifts carry on.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    ForEach(vm.skaters) { player in
+                        lineMenu(for: player)
                     }
                 }
             }

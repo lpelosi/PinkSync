@@ -709,6 +709,31 @@ enum APIClient {
         let clockRunning: Bool
         /// Lets the banner name the tournament. Left out for a league game.
         let tournamentId: String?
+        /// The latest play worth announcing. Left out when there is none, which
+        /// also takes down one that was undone.
+        var lastPlay: LivePlay? = nil
+    }
+
+    /// One play, for the website's lower third.
+    struct LivePlay: Encodable, Equatable {
+        struct Assist: Encodable, Equatable {
+            let name: String
+            let number: Int?
+        }
+
+        /// Unique per play, so the website shows each one once.
+        let id: String
+        /// "goal", "save", "block", "hit" or "penalty".
+        let type: String
+        let playerId: String
+        let playerName: String
+        /// Nil for a substitute with no number.
+        let playerNumber: Int?
+        let assists: [Assist]
+        /// "PP", "SH" or empty.
+        let strength: String
+        /// The kind of penalty, e.g. "Minor".
+        let note: String
     }
 
     /// Push the scoreboard for the website's live banner.
@@ -723,9 +748,12 @@ enum APIClient {
     }
 
     /// Take the live banner down, but only if it is still showing this game.
-    static func clearLiveScore(gameId: String) async throws {
+    /// With no game, whatever is showing comes down.
+    static func clearLiveScore(gameId: String? = nil) async throws {
         guard var components = URLComponents(string: "\(baseURL)/api/live") else { throw URLError(.badURL) }
-        components.queryItems = [URLQueryItem(name: "gameId", value: gameId)]
+        if let gameId, !gameId.isEmpty {
+            components.queryItems = [URLQueryItem(name: "gameId", value: gameId)]
+        }
         guard let url = components.url else { throw URLError(.badURL) }
         let request = try await authorizedRequest(url: url, method: "DELETE")
         let (_, response) = try await URLSession.shared.data(for: request)
@@ -733,6 +761,13 @@ enum APIClient {
               (200...299).contains(http.statusCode) else {
             throw URLError(.badServerResponse)
         }
+    }
+
+    /// A game that is deleted or reset must not stay live on the website.
+    /// Best effort: the banner expires by itself if this never gets through.
+    static func takeDownLiveScore(for gameId: String) {
+        guard !gameId.isEmpty else { return }
+        Task { try? await clearLiveScore(gameId: gameId) }
     }
 
     // MARK: - Tournaments
