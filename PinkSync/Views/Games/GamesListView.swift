@@ -51,7 +51,7 @@ struct GamesListView: View {
             let entryDate = boutDate(entry)
             return !unlinked.contains { game in
                 let daysBetween = abs(Calendar.current.dateComponents([.day], from: game.date, to: entryDate).day ?? 999)
-                return daysBetween <= 1 && game.opponent == entry.opponent
+                return daysBetween <= 1 && TeamLogoSync.teamKey(game.opponent) == TeamLogoSync.teamKey(entry.opponent)
             }
         }
     }
@@ -429,7 +429,7 @@ struct GamesListView: View {
 
                     let newGame = Game(
                         date: parsedDate,
-                        opponent: remote.opponent,
+                        opponent: OpponentTeam.listedName(for: remote.opponent),
                         location: remote.location ?? "",
                         goalsFor: remote.goalsFor,
                         goalsAgainst: remote.goalsAgainst,
@@ -493,7 +493,7 @@ struct GamesListView: View {
         playerByNumber: [Int: Player]
     ) {
         local.date = dateFormatter.date(from: remote.date) ?? local.date
-        local.opponent = remote.opponent
+        local.opponent = OpponentTeam.listedName(for: remote.opponent)
         local.location = remote.location ?? ""
         local.goalsFor = remote.goalsFor
         local.goalsAgainst = remote.goalsAgainst
@@ -625,7 +625,7 @@ struct GamesListView: View {
     @ViewBuilder
     private func boutRow(_ entry: APIClient.ScheduleEntry) -> some View {
         HStack(spacing: 12) {
-            if let team = savedTeams.first(where: { $0.name == entry.opponent }) {
+            if let team = TeamLogoSync.team(named: entry.opponent, in: savedTeams) {
                 boutTeamLogo(team: team, size: 36)
             } else {
                 Circle()
@@ -706,7 +706,7 @@ struct GamesListView: View {
 
     private func gameRow(_ game: Game) -> some View {
         HStack(spacing: 12) {
-            if let team = savedTeams.first(where: { $0.name == game.opponent }) {
+            if let team = TeamLogoSync.team(named: game.opponent, in: savedTeams) {
                 boutTeamLogo(team: team, size: 36)
             } else {
                 Circle()

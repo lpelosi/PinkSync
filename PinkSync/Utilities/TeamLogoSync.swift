@@ -24,8 +24,17 @@ enum TeamLogoSync {
 
     /// A team name reduced to what identifies it, the same way the server
     /// does: "WOLVES " and "Wolves" are one team.
-    static func teamKey(_ name: String) -> String {
+    nonisolated static func teamKey(_ name: String) -> String {
         name.split(whereSeparator: \.isWhitespace).joined(separator: " ").lowercased()
+    }
+
+    /// The saved team an opponent's name points at, however it was typed on
+    /// the schedule. The exact name wins when two saved teams share a key.
+    static func team(named name: String, in teams: [OpponentTeam]) -> OpponentTeam? {
+        if let exact = teams.first(where: { $0.name == name }) { return exact }
+        let wanted = teamKey(name)
+        guard !wanted.isEmpty else { return nil }
+        return teams.first { teamKey($0.name) == wanted }
     }
 
     /// What one team needs, given what the server holds for it.

@@ -1000,6 +1000,11 @@ enum APIClient {
         /// Set on tournament bouts. A game started from one inherits it.
         let tournamentId: String?
 
+        /// The same bout with its opponent under the name the team is listed by.
+        var listed: ScheduleEntry {
+            ScheduleEntry(id: id, date: date, opponent: OpponentTeam.listedName(for: opponent), location: location, time: time, isHome: isHome, tournamentId: tournamentId)
+        }
+
         /// "vs Opponent" at home, "@ Opponent" on the road.
         var matchupTitle: String {
             isHome == false ? "@ \(opponent)" : "vs \(opponent)"
@@ -1038,7 +1043,7 @@ enum APIClient {
               (200...299).contains(http.statusCode) else {
             throw URLError(.badServerResponse)
         }
-        return try JSONDecoder().decode([ScheduleEntry].self, from: data)
+        return try JSONDecoder().decode([ScheduleEntry].self, from: data).map(\.listed)
     }
 
     static func addScheduleEntry(date: String, opponent: String, location: String, time: String, isHome: Bool? = nil, tournamentId: String? = nil) async throws -> ScheduleEntry {
@@ -1055,7 +1060,7 @@ enum APIClient {
         }
         let result = try JSONDecoder().decode(AddScheduleResponse.self, from: data)
         guard let entry = result.entry else { throw URLError(.cannotParseResponse) }
-        return entry
+        return entry.listed
     }
 
     static func deleteScheduleEntry(id: String) async throws {
