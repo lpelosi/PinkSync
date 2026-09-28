@@ -79,6 +79,36 @@ final class TournamentTests: XCTestCase {
         XCTAssertFalse(withRoster.isOnRoster(homebody))
     }
 
+    func testAPickupIsListedForTheTournamentAndAPlayerTheServerDroppedNowhere() throws {
+        let container = try TestSupport.makeContainer()
+        let context = container.mainContext
+        let regular = TestSupport.player("Regular", number: 7, in: context)
+        regular.seasonIds = ["2026-fall"]
+        // Picked up for the tournament: on the team roster, on no season.
+        let pickup = TestSupport.player("Pickup", number: 1, in: context)
+        pickup.seasonIds = []
+        // Gone from the server. Never given a season, so "every season".
+        let dropped = TestSupport.player("Dropped", number: 1, in: context)
+        dropped.isActive = false
+
+        var withRoster = classic
+        withRoster.roster = [regular.playerId, pickup.playerId, dropped.playerId]
+        let everyone = [regular, pickup, dropped]
+
+        let fall = RosterView.roster(from: everyone, selection: "2026-fall", tournament: nil)
+        XCTAssertEqual(fall.map(\.name), ["Regular"])
+
+        let travelling = RosterView.roster(from: everyone, selection: withRoster.selectionId, tournament: withRoster)
+        XCTAssertEqual(travelling.map(\.name), ["Regular", "Pickup"])
+
+        let all = RosterView.roster(from: everyone, selection: Season.allId, tournament: nil)
+        XCTAssertEqual(all.map(\.name), ["Regular", "Pickup"])
+
+        let scope = StatScope(season: nil, type: nil, seasons: seasons)
+        let table = StatsTable(players: everyone, scope: scope, seasonId: Season.allId, selectedGames: [])
+        XCTAssertEqual(table.skaters.map(\.player.name), ["Regular", "Pickup"])
+    }
+
     func testWithNoRosterItIsWhoeverPlayed() throws {
         let container = try TestSupport.makeContainer()
         let context = container.mainContext

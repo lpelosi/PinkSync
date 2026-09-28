@@ -33,9 +33,17 @@ final class OpponentTeam {
         SeedInfo(name: "Warriors", logoAsset: "warriors"),
         SeedInfo(name: "Dangleberry Puckhounds", logoAsset: "puckhounds"),
         SeedInfo(name: "Whiskey Tangos", logoAsset: "tangos"),
-        SeedInfo(name: "Wolves", logoAsset: "wolves"),
+        SeedInfo(name: "WOLVES", logoAsset: "wolves"),
         SeedInfo(name: "Otterhawks", logoAsset: "otterhawks"),
         SeedInfo(name: "District 5", logoAsset: "d5"),
         SeedInfo(name: "Frozen Flamingos", logoAsset: "flamingos_emblem"),
     ]
+
+    /// The name a team is listed under. A league team has one, however the
+    /// schedule or a scorekeeper typed it: "Wolves" is "WOLVES". Any other
+    /// name is left as it was typed.
+    static func listedName(for name: String) -> String {
+        let key = TeamLogoSync.teamKey(name)
+        return seedTeams.first { TeamLogoSync.teamKey($0.name) == key }?.name ?? name
+    }
 }

@@ -37,7 +37,7 @@ struct GameFormView: View {
 
     /// The resolved opponent name from either picker or custom input
     private var resolvedOpponent: String {
-        useCustomOpponent ? opponent : (selectedTeam?.name ?? "")
+        useCustomOpponent ? OpponentTeam.listedName(for: opponent) : (selectedTeam?.name ?? "")
     }
 
     var body: some View {
