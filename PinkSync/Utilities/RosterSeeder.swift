@@ -118,7 +118,53 @@ enum RosterSeeder {
         }
     }
 
+    /// Bring teams and games saved under another spelling of a league team's
+    /// name ("Wolves") to the one it is listed under ("WOLVES"). Two saved
+    /// teams that turn out to be the same one become one, keeping a logo if
+    /// either had it. Returns whether anything changed.
+    @discardableResult
+    static func useListedTeamNames(modelContext: ModelContext) -> Bool {
+        var changed = false
+
+        let teams = (try? modelContext.fetch(FetchDescriptor<OpponentTeam>())) ?? []
+        var keptByName = Dictionary(
+            teams.filter { OpponentTeam.listedName(for: $0.name) == $0.name }.map { ($0.name, $0) },
+            uniquingKeysWith: { first, _ in first }
+        )
+        for team in teams {
+            let listed = OpponentTeam.listedName(for: team.name)
+            guard listed != team.name else { continue }
+            if let kept = keptByName[listed] {
+                if kept.logoData == nil, team.logoData != nil {
+                    kept.logoData = team.logoData
+                    kept.logoVersion = team.logoVersion
+                    kept.logoNeedsUpload = team.logoNeedsUpload
+                }
+                modelContext.delete(team)
+            } else {
+                team.name = listed
+                keptByName[listed] = team
+            }
+            changed = true
+        }
+
+        let games = (try? modelContext.fetch(FetchDescriptor<Game>())) ?? []
+        for game in games {
+            let listed = OpponentTeam.listedName(for: game.opponent)
+            guard listed != game.opponent else { continue }
+            game.opponent = listed
+            changed = true
+        }
+
+        if changed {
+            try? modelContext.save()
+        }
+        return changed
+    }
+
     static func seedOpponentTeamsIfNeeded(modelContext: ModelContext) {
+        useListedTeamNames(modelContext: modelContext)
+
         let descriptor = FetchDescriptor<OpponentTeam>()
         let existing = (try? modelContext.fetch(descriptor)) ?? []
         let existingByName = Dictionary(existing.map { ($0.name, $0) }, uniquingKeysWith: { first, _ in first })

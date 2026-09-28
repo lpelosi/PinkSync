@@ -24,7 +24,7 @@ struct MatchupHistoryView: View {
 
     /// Look up saved team by opponent name
     private func savedTeam(for opponent: String) -> OpponentTeam? {
-        savedTeams.first { $0.name == opponent }
+        TeamLogoSync.team(named: opponent, in: savedTeams)
     }
 
     var body: some View {
