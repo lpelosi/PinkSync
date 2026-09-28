@@ -589,11 +589,17 @@ enum APIClient {
         return resized.jpegData(compressionQuality: quality)
     }
 
-    /// Upload a team logo to the server. Compresses to 640×640 JPEG quality 70% first.
-    /// Fails silently — logo upload is best-effort.
-    static func sendTeamLogo(teamName: String, logoData: Data) async {
-        guard let compressed = compressLogo(logoData) else { return }
-        guard let url = URL(string: "\(baseURL)/api/team-logo") else { return }
+    private struct TeamLogoResponse: Decodable {
+        let path: String?
+    }
+
+    /// Upload a team logo to the server, replacing the one it has. Compresses
+    /// to 640×640 JPEG quality 70% first. Returns the server's versioned path
+    /// for the new logo, or nil if the upload did not go through.
+    @discardableResult
+    static func sendTeamLogo(teamName: String, logoData: Data) async -> String? {
+        guard let compressed = compressLogo(logoData) else { return nil }
+        guard let url = URL(string: "\(baseURL)/api/team-logo") else { return nil }
 
         do {
             var request = try await authorizedRequest(url: url, method: "POST")
@@ -602,13 +608,41 @@ enum APIClient {
                 logoBase64: compressed.base64EncodedString()
             )
             request.httpBody = try JSONEncoder().encode(payload)
-            let (_, response) = try await URLSession.shared.data(for: request)
-            if let http = response as? HTTPURLResponse, !(200...299).contains(http.statusCode) {
-                logger.warning("Team logo upload failed: HTTP \(http.statusCode)")
+            let (data, response) = try await URLSession.shared.data(for: request)
+            guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
+                let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+                logger.warning("Team logo upload failed: HTTP \(status)")
+                return nil
             }
+            return (try? JSONDecoder().decode(TeamLogoResponse.self, from: data))?.path
         } catch {
             logger.error("Team logo upload error: \(error.localizedDescription)")
+            return nil
         }
+    }
+
+    /// Every logo the server holds: team name to versioned path. The path
+    /// changes whenever the logo is replaced.
+    static func fetchTeamLogos() async throws -> [String: String] {
+        let request = try await authorizedRequest(url: try url(path: "/api/team-logos", season: .current))
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse,
+              (200...299).contains(http.statusCode) else {
+            throw URLError(.badServerResponse)
+        }
+        return try JSONDecoder().decode([String: String].self, from: data)
+    }
+
+    /// The image at a path the server handed out, e.g. "/img/teams/wolves.jpg?v=1".
+    static func downloadImage(path: String) async throws -> Data {
+        guard path.hasPrefix("/"), let url = URL(string: "\(baseURL)\(path)") else { throw URLError(.badURL) }
+        let (data, response) = try await URLSession.shared.data(from: url)
+        guard let http = response as? HTTPURLResponse,
+              (200...299).contains(http.statusCode),
+              UIImage(data: data) != nil else {
+            throw URLError(.badServerResponse)
+        }
+        return data
     }
 
     /// Delete a game from the server by its stable gameId.
