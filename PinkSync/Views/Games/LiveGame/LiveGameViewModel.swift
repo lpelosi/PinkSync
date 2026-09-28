@@ -192,6 +192,14 @@ final class LiveGameViewModel: Identifiable {
     // Live scoreboard on the website. Pushed at most every few seconds while
     // scoring, taken down when the game ends. Off in tests.
     var publishesLiveScore = true
+
+    /// The latest play for the website's lower third, and the event behind
+    /// it so undoing that play takes the announcement down.
+    private(set) var lastLivePlay: APIClient.LivePlay?
+    private var lastLivePlayEvent: GameEvent?
+    /// Off while an old play is being corrected, so a fix to the first period
+    /// is not announced as if it just happened.
+    private var announcesPlays = true
     private var livePublishingSuspended = false
     private var livePushTask: Task<Void, Never>?
     private var livePushPending = false
@@ -880,8 +888,34 @@ final class LiveGameViewModel: Identifiable {
             period: livePeriodLabel,
             clock: isClockSetUp ? clockDisplay : "",
             clockRunning: clockRunning,
-            tournamentId: game.tournamentId.isEmpty ? nil : game.tournamentId
+            tournamentId: game.tournamentId.isEmpty ? nil : game.tournamentId,
+            lastPlay: lastLivePlay
         )
+    }
+
+    /// Event types the website announces, and what it calls them. A shot
+    /// against that did not go in is a save by the goalie stamped on it.
+    private static let announcedPlays = [
+        "goal": "goal",
+        "shotAgainst": "save",
+        "block": "block",
+        "hit": "hit",
+        "penalty": "penalty"
+    ]
+
+    private func announce(_ event: GameEvent, player: Player?, assists: [Player]) {
+        guard announcesPlays, let player, let type = Self.announcedPlays[event.type] else { return }
+        lastLivePlay = APIClient.LivePlay(
+            id: UUID().uuidString,
+            type: type,
+            playerId: player.playerId,
+            playerName: player.name,
+            playerNumber: effectiveNumber(for: player),
+            assists: assists.map { APIClient.LivePlay.Assist(name: $0.name, number: effectiveNumber(for: $0)) },
+            strength: event.isPowerPlay ? "PP" : event.isShortHanded ? "SH" : "",
+            note: event.penaltyType
+        )
+        lastLivePlayEvent = event
     }
 
     /// Coalesces pushes: the first goes out immediately, later ones wait for
@@ -979,6 +1013,7 @@ final class LiveGameViewModel: Identifiable {
         event.onIcePlayerIds = onIcePlayerIds
         event.game = game
         modelContext.insert(event)
+        announce(event, player: player, assists: [assist1, assist2].compactMap { $0 })
         return event
     }
 
@@ -1586,6 +1621,10 @@ final class LiveGameViewModel: Identifiable {
     }
 
     private func removeGameEvent(_ event: GameEvent) {
+        if event === lastLivePlayEvent {
+            lastLivePlay = nil
+            lastLivePlayEvent = nil
+        }
         modelContext.delete(event)
         try? modelContext.save()
     }
@@ -1699,6 +1738,9 @@ final class LiveGameViewModel: Identifiable {
         // Undo old stats
         events[index].undoClosure?()
         events.remove(at: index)
+
+        announcesPlays = false
+        defer { announcesPlays = true }
 
         // Temporarily set period to match the edited event
         let savedPeriod = currentPeriod
