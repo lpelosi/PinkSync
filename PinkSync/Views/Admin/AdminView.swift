@@ -96,6 +96,19 @@ struct AdminView: View {
                 Text("Start a new season, flag the playoffs, or fix season dates. Changes apply to the website immediately.")
             }
 
+            // Tournaments
+            Section {
+                NavigationLink {
+                    TournamentAdminView()
+                } label: {
+                    Label("Tournaments", systemImage: "trophy")
+                }
+            } header: {
+                Text("Tournaments")
+            } footer: {
+                Text("Book a tournament and set who is travelling. Its games are kept out of the season stats.")
+            }
+
             // User Management
             Section {
                 NavigationLink {

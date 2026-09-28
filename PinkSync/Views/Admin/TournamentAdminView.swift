@@ -1,0 +1,315 @@
+import SwiftUI
+import SwiftData
+
+/// Manage tournaments from the app: book one, fix its dates, set who is
+/// travelling. Writes the whole list through `PUT /api/tournaments`; the
+/// server validates it and refuses to drop a tournament that still has games
+/// or bouts.
+struct TournamentAdminView: View {
+    @Environment(TournamentStore.self) private var tournamentStore
+
+    @State private var editing: TournamentDraft?
+    @State private var errorMessage: String?
+    @State private var showError = false
+
+    var body: some View {
+        List {
+            Section {
+                if tournamentStore.tournaments.isEmpty {
+                    Text("No tournaments yet.")
+                        .foregroundStyle(.secondary)
+                }
+                ForEach(tournamentStore.newestFirst) { tournament in
+                    Button {
+                        editing = TournamentDraft(tournament: tournament)
+                    } label: {
+                        tournamentRow(tournament)
+                    }
+                    .tint(.primary)
+                }
+            } header: {
+                Text("Tournaments")
+            } footer: {
+                Text("A game belongs to a tournament when it is started from one of the tournament's bouts, or when the tournament is picked on the game. The date alone never decides it, so a league game on the same weekend stays a league game.")
+            }
+
+            Section {
+                Button {
+                    editing = TournamentDraft.new()
+                } label: {
+                    Label("Book a Tournament", systemImage: "plus.circle")
+                }
+            } footer: {
+                Text("Add its games from the Games tab with Schedule Bout, picking the tournament on each.")
+            }
+        }
+        .navigationTitle("Tournaments")
+        .sheet(item: $editing) { draft in
+            NavigationStack {
+                TournamentFormView(draft: draft, tournaments: tournamentStore.tournaments) { updated in
+                    await save(updated)
+                }
+            }
+        }
+        .alert("Could Not Save", isPresented: $showError) {
+            Button("OK") {}
+        } message: {
+            Text(errorMessage ?? "An error occurred.")
+        }
+        .task { await tournamentStore.load() }
+        .refreshable { await tournamentStore.load() }
+    }
+
+    private func tournamentRow(_ tournament: Tournament) -> some View {
+        HStack {
+            VStack(alignment: .leading, spacing: 3) {
+                Text(tournament.title)
+                    .font(.headline)
+                Text("\(SeasonDay.display(tournament.start)) – \(SeasonDay.display(tournament.end))")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Text(rosterSummary(tournament))
+                    .font(.caption)
+                    .foregroundStyle(tournament.hasRoster ? Color.secondary : Color.orange)
+            }
+            Spacer()
+            if tournament.status == "in-progress" {
+                Text("NOW")
+                    .font(.caption2.bold())
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(AppTheme.pink.opacity(0.15), in: Capsule())
+                    .foregroundStyle(AppTheme.pink)
+            }
+            Image(systemName: "chevron.right")
+                .font(.caption)
+                .foregroundStyle(.tertiary)
+        }
+    }
+
+    private func rosterSummary(_ tournament: Tournament) -> String {
+        let count = tournament.roster?.count ?? 0
+        return count == 0 ? "No roster set" : "\(count) on the roster"
+    }
+
+    /// Send a full list. `updated` already has the edited tournament merged in.
+    private func save(_ updated: [Tournament]) async -> Bool {
+        do {
+            let accepted = try await APIClient.saveTournaments(updated)
+            tournamentStore.replace(with: accepted)
+            return true
+        } catch {
+            errorMessage = error.localizedDescription
+            showError = true
+            return false
+        }
+    }
+}
+
+// MARK: - Draft
+
+struct TournamentDraft: Identifiable {
+    let id: String
+    let isNew: Bool
+    var label: String
+    var start: Date
+    var end: Date
+    var location: String
+    var division: String
+    /// Carried through untouched; the app has no field for it.
+    let url: String?
+    /// Player ids, upper-cased the way the server stores them.
+    var roster: Set<String>
+
+    init(tournament: Tournament) {
+        id = tournament.id
+        isNew = false
+        label = tournament.label
+        start = SeasonDay.date(from: tournament.start)
+        end = SeasonDay.date(from: tournament.end)
+        location = tournament.location ?? ""
+        division = tournament.division ?? ""
+        url = tournament.url
+        roster = Set((tournament.roster ?? []).map { $0.uppercased() })
+    }
+
+    /// A new tournament over the coming weekend.
+    static func new(today: Date = Date()) -> TournamentDraft {
+        let calendar = Calendar.current
+        let start = calendar.date(byAdding: .day, value: 7, to: today) ?? today
+        let end = calendar.date(byAdding: .day, value: 2, to: start) ?? start
+        return TournamentDraft(start: start, end: end)
+    }
+
+    private init(start: Date, end: Date) {
+        id = ""
+        isNew = true
+        label = ""
+        self.start = start
+        self.end = end
+        location = ""
+        division = ""
+        url = nil
+        roster = []
+    }
+
+    /// A URL-safe id from the label and the year, unique among `existing`.
+    func resolvedId(existing: [Tournament]) -> String {
+        if !isNew { return id }
+        let year = SeasonDay.string(from: start).prefix(4)
+        let named = label.range(of: #"\b\d{4}\b"#, options: .regularExpression) == nil ? "\(label) \(year)" : label
+        let base = named.lowercased()
+            .map { $0.isASCII && ($0.isLetter || $0.isNumber) ? String($0) : "-" }
+            .joined()
+            .split(separator: "-", omittingEmptySubsequences: true)
+            .joined(separator: "-")
+        let slug = base.count < 2 ? "tournament-\(year)" : String(base.prefix(50))
+        let taken = Set(existing.map(\.id))
+        if !taken.contains(slug) { return slug }
+        var n = 2
+        while taken.contains("\(slug)-\(n)") { n += 1 }
+        return "\(slug)-\(n)"
+    }
+
+    func tournament(existing: [Tournament]) -> Tournament {
+        let trimmedLocation = location.trimmingCharacters(in: .whitespaces)
+        let trimmedDivision = division.trimmingCharacters(in: .whitespaces)
+        return Tournament(
+            id: resolvedId(existing: existing),
+            label: label.trimmingCharacters(in: .whitespaces),
+            start: SeasonDay.string(from: start),
+            end: SeasonDay.string(from: end),
+            location: trimmedLocation.isEmpty ? nil : trimmedLocation,
+            division: trimmedDivision.isEmpty ? nil : trimmedDivision,
+            url: url,
+            roster: roster.isEmpty ? nil : roster.sorted()
+        )
+    }
+}
+
+// MARK: - Form
+
+private struct TournamentFormView: View {
+    @State var draft: TournamentDraft
+    let tournaments: [Tournament]
+    /// Receives the full, merged list. Returns whether the save went through.
+    let onSave: ([Tournament]) async -> Bool
+    @Environment(\.dismiss) private var dismiss
+    @Environment(SeasonStore.self) private var seasonStore
+    @Query(sort: \Player.number) private var players: [Player]
+
+    @State private var isSaving = false
+    @State private var showingDeleteConfirm = false
+
+    private var canSave: Bool {
+        !draft.label.trimmingCharacters(in: .whitespaces).isEmpty && draft.start <= draft.end
+    }
+
+    /// Everyone who could travel: active players with an id the server knows.
+    private var candidates: [Player] {
+        players.filter { $0.isActive && !$0.playerId.isEmpty }
+    }
+
+    /// The league roster for the season the tournament falls in.
+    private var seasonRosterIds: Set<String> {
+        Set(candidates.filter { seasonStore.isOnRoster($0, on: draft.start) }.map { $0.playerId.uppercased() })
+    }
+
+    var body: some View {
+        Form {
+            Section("Tournament") {
+                TextField("Name (e.g. Twin Cities Classic)", text: $draft.label)
+                DatePicker("First day", selection: $draft.start, displayedComponents: .date)
+                DatePicker("Last day", selection: $draft.end, displayedComponents: .date)
+                TextField("Location", text: $draft.location)
+                TextField("Division (e.g. Level 4)", text: $draft.division)
+                if !draft.isNew {
+                    LabeledContent("ID", value: draft.id)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            Section {
+                Button("Select the Season Roster") {
+                    draft.roster = seasonRosterIds
+                }
+                Button("Clear", role: .destructive) {
+                    draft.roster.removeAll()
+                }
+                .disabled(draft.roster.isEmpty)
+
+                ForEach(candidates) { player in
+                    let playerId = player.playerId.uppercased()
+                    Button {
+                        if draft.roster.contains(playerId) {
+                            draft.roster.remove(playerId)
+                        } else {
+                            draft.roster.insert(playerId)
+                        }
+                    } label: {
+                        HStack {
+                            PlayerRow(player: player)
+                            Spacer()
+                            Image(systemName: draft.roster.contains(playerId) ? "checkmark.circle.fill" : "circle")
+                                .foregroundStyle(draft.roster.contains(playerId) ? AnyShapeStyle(AppTheme.pink) : AnyShapeStyle(.tertiary))
+                        }
+                    }
+                    .tint(.primary)
+                }
+            } header: {
+                Text("Travel Roster (\(draft.roster.count))")
+            } footer: {
+                Text("Only these players are offered for the tournament's lineups, and only they appear on its roster and stats pages. A pickup has to be added on the Roster tab first. With nobody selected, the roster is whoever plays.")
+            }
+
+            if !draft.isNew {
+                Section {
+                    Button("Delete Tournament", role: .destructive) {
+                        showingDeleteConfirm = true
+                    }
+                } footer: {
+                    Text("Refused while the tournament still has games or bouts.")
+                }
+            }
+        }
+        .navigationTitle(draft.isNew ? "New Tournament" : "Edit Tournament")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .cancellationAction) {
+                Button("Cancel") { dismiss() }
+                    .disabled(isSaving)
+            }
+            ToolbarItem(placement: .confirmationAction) {
+                if isSaving {
+                    ProgressView()
+                } else {
+                    Button("Save") { Task { await save() } }
+                        .disabled(!canSave)
+                }
+            }
+        }
+        .alert("Delete \(draft.label)?", isPresented: $showingDeleteConfirm) {
+            Button("Cancel", role: .cancel) {}
+            Button("Delete", role: .destructive) { Task { await delete() } }
+        }
+    }
+
+    private func save() async {
+        isSaving = true
+        let edited = draft.tournament(existing: tournaments)
+        var merged = tournaments.filter { $0.id != edited.id }
+        merged.append(edited)
+        if await onSave(merged) {
+            dismiss()
+        }
+        isSaving = false
+    }
+
+    private func delete() async {
+        isSaving = true
+        if await onSave(tournaments.filter { $0.id != draft.id }) {
+            dismiss()
+        }
+        isSaving = false
+    }
+}

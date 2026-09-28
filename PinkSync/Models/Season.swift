@@ -71,23 +71,34 @@ enum GameType: String, CaseIterable, Identifiable, Sendable {
 }
 
 /// Which games a stat table should count. `season == nil` means every season,
-/// `type == nil` means regular season and playoffs together.
+/// `type == nil` means every kind of game: regular season, playoffs and
+/// tournaments together.
+///
+/// Tournament games are tagged rather than dated, so they are neither regular
+/// season nor playoffs whatever day they were played. A `tournamentId` makes
+/// the scope that tournament alone and sets `season` and `type` aside. This
+/// mirrors `?tournament=` and `?type=` on the server.
 struct StatScope: Hashable, Sendable {
     var season: Season?
     var type: GameType?
     /// The season list used to classify dates. Needed even when `season` is nil
     /// so `type` can be resolved against the right `playoffsStart`.
     var seasons: [Season]
+    var tournamentId: String? = nil
 
     /// Everything, all-time — what the app showed before seasons existed.
     static let allTime = StatScope(season: nil, type: nil, seasons: Season.defaults)
 
     func includes(_ game: Game?) -> Bool {
         guard let game else { return false }
+        if let tournamentId { return game.tournamentId == tournamentId }
         let day = Season.apiDay(for: game.date)
         let owner = Season.season(for: day, in: seasons)
         if let season, owner?.id != season.id { return false }
-        if let type, (owner?.gameType(for: day) ?? .regular) != type { return false }
+        if let type {
+            if !game.tournamentId.isEmpty { return false }
+            if (owner?.gameType(for: day) ?? .regular) != type { return false }
+        }
         return true
     }
 }

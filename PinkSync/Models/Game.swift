@@ -7,6 +7,10 @@ final class Game {
     /// Default "" allows lightweight migration for existing games; the server falls back to date+opponent.
     var gameId: String = ""
     var scheduleId: String = ""
+    /// The tournament this game is part of, or "" for a league game. Set from
+    /// the bout the game was started from, from the New Game form, or by the
+    /// server on sync. Default "" allows lightweight SwiftData migration.
+    var tournamentId: String = ""
     var date: Date
     var opponent: String
     var location: String

@@ -65,8 +65,13 @@ final class SeasonStore {
         return player.isMember(of: season.id)
     }
 
-    /// A scope for the given picker selection. `Season.allId` means every season.
+    /// A scope for the given picker selection. `Season.allId` means every
+    /// season, and a tournament selection means that tournament's games alone,
+    /// whatever `type` says.
     func scope(seasonId: String, type: GameType?) -> StatScope {
-        StatScope(season: seasonId == Season.allId ? nil : season(id: seasonId), type: type, seasons: seasons)
+        if let tournamentId = Tournament.tournamentId(fromSelection: seasonId) {
+            return StatScope(season: nil, type: nil, seasons: seasons, tournamentId: tournamentId)
+        }
+        return StatScope(season: seasonId == Season.allId ? nil : season(id: seasonId), type: type, seasons: seasons)
     }
 }

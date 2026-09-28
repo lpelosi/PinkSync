@@ -6,12 +6,15 @@ struct GameFormView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var modelContext
     @Environment(SeasonStore.self) private var seasonStore
+    @Environment(TournamentStore.self) private var tournamentStore
     @Query(sort: \Player.number) private var allPlayers: [Player]
     @Query(sort: \OpponentTeam.name) private var savedTeams: [OpponentTeam]
 
     @State private var date = Date()
     @State private var opponent = ""
     @State private var location = ""
+    /// "" for a league game.
+    @State private var tournamentId = ""
     @State private var selectedGoalieID: PersistentIdentifier?
     @State private var selectedTeamID: PersistentIdentifier?
     @State private var useCustomOpponent = false
@@ -21,9 +24,14 @@ struct GameFormView: View {
     @State private var newTeamPhotoItem: PhotosPickerItem?
     @State private var newTeamLogoData: Data?
 
-    /// Goalies on the roster for the season the chosen date falls in.
+    /// Goalies on the travel roster for a tournament game, otherwise on the
+    /// roster for the season the chosen date falls in.
     private var goalies: [Player] {
-        allPlayers.filter { $0.isGoalie && seasonStore.isOnRoster($0, on: date) }
+        allPlayers.filter { player in
+            player.isGoalie
+                && (tournamentStore.rosterDecision(for: player, tournamentId: tournamentId)
+                    ?? seasonStore.isOnRoster(player, on: date))
+        }
     }
 
     private var selectedTeam: OpponentTeam? {
@@ -40,6 +48,18 @@ struct GameFormView: View {
             Section {
                 DatePicker("Date", selection: $date, displayedComponents: .date)
                 TextField("Location", text: $location)
+                if !tournamentStore.tournaments.isEmpty {
+                    Picker("Tournament", selection: $tournamentId) {
+                        Text("None").tag("")
+                        ForEach(tournamentStore.newestFirst) { tournament in
+                            Text(tournament.title).tag(tournament.id)
+                        }
+                    }
+                }
+            } footer: {
+                if !tournamentStore.tournaments.isEmpty {
+                    Text("Tournament games are kept out of the season stats. A game started from a tournament bout is filed for you.")
+                }
             }
 
             Section("Opponent") {
@@ -160,6 +180,12 @@ struct GameFormView: View {
                 .disabled(resolvedOpponent.isEmpty || selectedGoalieID == nil)
             }
         }
+        // The travel roster may not include the goalie already picked.
+        .onChange(of: tournamentId) {
+            if !goalies.contains(where: { $0.persistentModelID == selectedGoalieID }) {
+                selectedGoalieID = nil
+            }
+        }
         .onChange(of: newTeamPhotoItem) {
             Task {
                 if let data = try? await newTeamPhotoItem?.loadTransferable(type: Data.self) {
@@ -207,6 +233,7 @@ struct GameFormView: View {
 
         let game = Game(date: date, opponent: resolvedOpponent, location: location)
         game.team = team
+        game.tournamentId = tournamentId
         game.startingGoalie = goalies.first { $0.persistentModelID == selectedGoalieID }
         modelContext.insert(game)
         try? modelContext.save()

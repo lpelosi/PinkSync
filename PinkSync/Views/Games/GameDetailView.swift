@@ -8,6 +8,7 @@ struct GameDetailView: View {
     @Environment(AuthManager.self) private var authManager
     @Environment(SyncManager.self) private var syncManager
     @Environment(SeasonStore.self) private var seasonStore
+    @Environment(TournamentStore.self) private var tournamentStore
     @Query(sort: \Player.number) private var allPlayers: [Player]
     @Query private var savedTeams: [OpponentTeam]
 
@@ -38,18 +39,38 @@ struct GameDetailView: View {
     }
 
     /// Roster players who can be in this game's lineup: active members of the
-    /// game's season, plus anyone already recorded in this game — a player
-    /// with a stat line must never be dropped from the lineup just because
-    /// their season membership says otherwise.
+    /// game's season — or of the travel roster, for a tournament game that
+    /// has one — plus anyone already recorded in this game. A player with a
+    /// stat line must never be dropped from the lineup just because their
+    /// roster membership says otherwise.
     private var eligiblePlayers: [Player] {
         let inGame = Set(
             game.playerStats.compactMap { $0.player?.persistentModelID }
             + game.goalieStats.compactMap { $0.player?.persistentModelID }
             + [game.startingGoalie?.persistentModelID].compactMap { $0 }
         )
-        return allPlayers.filter {
-            inGame.contains($0.persistentModelID) || ($0.isActive && seasonStore.isOnRoster($0, on: game.date))
+        return allPlayers.filter { player in
+            if inGame.contains(player.persistentModelID) { return true }
+            guard player.isActive else { return false }
+            return tournamentStore.rosterDecision(for: player, tournamentId: game.tournamentId)
+                ?? seasonStore.isOnRoster(player, on: game.date)
         }
+    }
+
+    /// Changing the tournament of a game the website already has is sent
+    /// straight away: a later Save & Send cannot take a game out of a
+    /// tournament. A game not sent yet just carries the choice with it.
+    private var tournamentBinding: Binding<String> {
+        Binding(
+            get: { game.tournamentId },
+            set: { chosen in
+                let previous = game.tournamentId
+                guard chosen != previous else { return }
+                game.tournamentId = chosen
+                guard game.isSynced, !game.gameId.isEmpty else { return }
+                Task { await moveOnServer(to: chosen, from: previous) }
+            }
+        )
     }
 
     private var lineupSkaters: [Player] {
@@ -85,6 +106,26 @@ struct GameDetailView: View {
                             .foregroundStyle(.secondary)
                         Spacer()
                         Text(game.location)
+                    }
+                }
+                if authManager.canManageGames && !tournamentStore.tournaments.isEmpty {
+                    Picker("Tournament", selection: tournamentBinding) {
+                        Text("None").tag("")
+                        ForEach(tournamentStore.newestFirst) { tournament in
+                            Text(tournament.title).tag(tournament.id)
+                        }
+                        // A tournament this device has no record of still
+                        // needs a row, or the picker has nothing to select.
+                        if !game.tournamentId.isEmpty && tournamentStore.tournament(id: game.tournamentId) == nil {
+                            Text(game.tournamentId).tag(game.tournamentId)
+                        }
+                    }
+                } else if let tournament = tournamentStore.title(for: game.tournamentId) {
+                    HStack {
+                        Text("Tournament")
+                            .foregroundStyle(.secondary)
+                        Spacer()
+                        Text(tournament)
                     }
                 }
             }
@@ -563,6 +604,16 @@ struct GameDetailView: View {
 
     private func goalieStats(for player: Player) -> GameGoalieStats? {
         game.goalieStats.first { $0.player?.persistentModelID == player.persistentModelID }
+    }
+
+    private func moveOnServer(to tournamentId: String, from previous: String) async {
+        do {
+            try await APIClient.setGameTournament(gameId: game.gameId, tournamentId: tournamentId)
+        } catch {
+            game.tournamentId = previous
+            sendError = "The tournament wasn't changed: \(error.localizedDescription)"
+            showingSendError = true
+        }
     }
 
     private func resetGame() async {

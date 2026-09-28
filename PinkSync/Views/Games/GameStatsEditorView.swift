@@ -6,6 +6,7 @@ struct GameStatsEditorView: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(\.dismiss) private var dismiss
     @Environment(SeasonStore.self) private var seasonStore
+    @Environment(TournamentStore.self) private var tournamentStore
     @Query(sort: \Player.number) private var allPlayers: [Player]
 
     @State private var showingAddPlayer = false
@@ -23,8 +24,11 @@ struct GameStatsEditorView: View {
 
     private var playersWithoutStats: [Player] {
         let existingIDs = Set(game.playerStats.compactMap { $0.player?.persistentModelID })
-        return allPlayers.filter {
-            $0.isActive && seasonStore.isOnRoster($0, on: game.date) && !existingIDs.contains($0.persistentModelID)
+        return allPlayers.filter { player in
+            player.isActive
+                && (tournamentStore.rosterDecision(for: player, tournamentId: game.tournamentId)
+                    ?? seasonStore.isOnRoster(player, on: game.date))
+                && !existingIDs.contains(player.persistentModelID)
         }
     }
 

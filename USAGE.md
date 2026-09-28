@@ -96,6 +96,15 @@ Fill in:
 
 Tap **Save** to create the game in **Setup** state.
 
+### Tournament games
+
+Tournament bouts carry a trophy tag with the tournament's name. **Start the game from its bout** and it is filed under the tournament for you: kept out of the season stats, named on the website's live banner, and offered the travel roster instead of the league roster.
+
+- A tournament can have two games in one day, and a second game against the same team. Check the opponent and time on the bout before you tap it.
+- Starting one with **New Game** instead? Pick the tournament in the form.
+- Filed wrong? An admin can change **Tournament** under **Game Info** on the game, before or after it is sent.
+- Periods are often shorter on the road. Pick the length under **Set Clock** each game.
+
 ---
 
 ## 6. Setting the Lineup
@@ -375,6 +384,19 @@ To manage roles:
 - **Start Playoffs Today** — one tap on the current season. Games from today on count as post-season; the Stats tab and the site keep regular season and playoffs apart. Nothing already recorded changes.
 - **Start New Season** — pre-filled to begin the day after the current season ends. It becomes the current season. Then set who is on its roster from the Roster tab (each player's **Seasons** toggles).
 - **Tap a season** to fix its label or dates, move the playoff start, make it current, or delete it. The server refuses overlapping seasons, two current seasons, and deleting a season a player is still listed on.
+
+---
+
+## 16b. Tournaments (Admin)
+
+**Admin → Tournaments** manages the tournaments the website and the app share.
+
+- **Book a Tournament** — name, first and last day, location and division.
+- **Travel Roster** — tick who is going, or start from **Select the Season Roster** and untick. Only these players are offered for the tournament's lineups and shown on its roster and stats. A pickup has to be added on the Roster tab first. With nobody ticked, the roster is whoever plays.
+- **Add its games** from the Games tab with **Schedule Bout**, picking the tournament on each. Add the final the same way once the team is in it.
+- **Seeing its numbers** — the season picker on the Games, Roster and Stats tabs lists tournaments under the seasons.
+
+The server refuses to delete a tournament that still has games or bouts. The tournament list is kept on the device, so the roster and names are there without a signal.
 
 ---
 

@@ -783,7 +783,8 @@ final class LiveGameViewModel: Identifiable {
             shotsAgainst: totalShotsAgainst,
             period: livePeriodLabel,
             clock: isClockSetUp ? clockDisplay : "",
-            clockRunning: clockRunning
+            clockRunning: clockRunning,
+            tournamentId: game.tournamentId.isEmpty ? nil : game.tournamentId
         )
     }
 

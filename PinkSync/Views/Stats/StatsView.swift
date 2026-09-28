@@ -7,6 +7,7 @@ struct StatsView: View {
     private var completedGames: [Game]
     @Environment(AuthManager.self) private var authManager
     @Environment(SeasonStore.self) private var seasonStore
+    @Environment(TournamentStore.self) private var tournamentStore
 
     /// Nil until the user picks; falls back to the current season.
     @State private var seasonId: String?
@@ -54,6 +55,15 @@ struct StatsView: View {
         seasonStore.scope(seasonId: selectedSeasonId, type: typeFilter.gameType)
     }
 
+    /// The tournament being viewed, when the picker is on one.
+    private var selectedTournament: Tournament? {
+        tournamentStore.tournament(forSelection: selectedSeasonId)
+    }
+
+    private var isTournamentSelected: Bool {
+        Tournament.tournamentId(fromSelection: selectedSeasonId) != nil
+    }
+
     /// Completed games in the chosen season and game type — what the game
     /// picker offers.
     private var gamesInScope: [Game] {
@@ -64,19 +74,22 @@ struct StatsView: View {
     private var isPicking: Bool { !selectedGameIDs.isEmpty }
 
     var body: some View {
-        let table = StatsTable(players: players, scope: scope, seasonId: selectedSeasonId, selectedGames: selectedGameIDs)
+        let table = StatsTable(players: players, scope: scope, seasonId: selectedSeasonId, selectedGames: selectedGameIDs, tournament: selectedTournament)
         let skaters = sortSkaters(table.skaters)
         let goalies = sortGoalies(table.goalies)
 
         return List {
             Section {
                 SeasonPicker(seasonId: seasonBinding)
-                Picker("Games", selection: $typeFilter) {
-                    ForEach(TypeFilter.allCases) { filter in
-                        Text(filter.label).tag(filter)
+                // A tournament has no regular season or playoffs to split.
+                if !isTournamentSelected {
+                    Picker("Games", selection: $typeFilter) {
+                        ForEach(TypeFilter.allCases) { filter in
+                            Text(filter.label).tag(filter)
+                        }
                     }
+                    .pickerStyle(.segmented)
                 }
-                .pickerStyle(.segmented)
                 scopeBar
                 NavigationLink {
                     RecordsView()
@@ -297,8 +310,9 @@ struct StatsView: View {
 /// Skaters are everyone whose position isn't Goalie, so a dual-role player
 /// keeps their skating line; goalies are anyone who can play in net or has.
 /// Without hand-picked games, a player shows if they are on the season's
-/// roster or played in scope. With hand-picked games, only if they played in
-/// at least one of them.
+/// roster — the travel roster, when a tournament is being viewed — or played
+/// in scope. With hand-picked games, only if they played in at least one of
+/// them.
 struct StatsTable {
     struct Row: Identifiable {
         let player: Player
@@ -309,7 +323,7 @@ struct StatsTable {
     let skaters: [Row]
     let goalies: [Row]
 
-    init(players: [Player], scope: StatScope, seasonId: String, selectedGames: Set<PersistentIdentifier>) {
+    init(players: [Player], scope: StatScope, seasonId: String, selectedGames: Set<PersistentIdentifier>, tournament: Tournament? = nil) {
         let picking = !selectedGames.isEmpty
         func counts(_ game: Game?) -> Bool {
             guard let game, scope.includes(game) else { return false }
@@ -323,7 +337,15 @@ struct StatsTable {
                 skater: player.gameStats.filter { counts($0.game) },
                 goalie: player.goalieGameStats.filter { counts($0.game) }
             )
-            let onRoster = seasonId == Season.allId || player.isMember(of: seasonId)
+            let onRoster: Bool
+            if let tournament {
+                onRoster = tournament.isOnRoster(player)
+            } else if Tournament.tournamentId(fromSelection: seasonId) != nil {
+                // A tournament this device has no record of: only who played.
+                onRoster = false
+            } else {
+                onRoster = seasonId == Season.allId || player.isMember(of: seasonId)
+            }
 
             if player.position != Position.goalie.rawValue {
                 let played = !totals.gameStats.isEmpty
@@ -370,7 +392,7 @@ private struct GameScopePickerView: View {
                     }
                     .buttonStyle(.plain)
                 } footer: {
-                    Text("Games listed are the completed ones in the season and game type you picked on the Stats tab.")
+                    Text("Games listed are the completed ones in the season and game type, or the tournament, you picked on the Stats tab.")
                 }
 
                 Section("Specific Games") {

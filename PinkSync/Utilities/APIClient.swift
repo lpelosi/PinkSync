@@ -304,6 +304,11 @@ enum APIClient {
     struct GamePayload: Encodable {
         let gameId: String
         let scheduleId: String?
+        /// Left out for a league game rather than sent as null. The server
+        /// reads a missing field as "work it out from the bout", and an
+        /// explicit null as "not a tournament game" — which would untag a game
+        /// this device simply has not heard the tournament of yet.
+        let tournamentId: String?
         let date: String
         let opponent: String
         let location: String
@@ -527,6 +532,7 @@ enum APIClient {
         let payload = GamePayload(
             gameId: game.gameId,
             scheduleId: game.scheduleId.isEmpty ? nil : game.scheduleId,
+            tournamentId: game.tournamentId.isEmpty ? nil : game.tournamentId,
             date: Season.apiTimestamp(for: game.date),
             opponent: game.opponent,
             location: game.location,
@@ -701,6 +707,8 @@ enum APIClient {
         let period: String
         let clock: String
         let clockRunning: Bool
+        /// Lets the banner name the tournament. Left out for a league game.
+        let tournamentId: String?
     }
 
     /// Push the scoreboard for the website's live banner.
@@ -724,6 +732,60 @@ enum APIClient {
         guard let http = response as? HTTPURLResponse,
               (200...299).contains(http.statusCode) else {
             throw URLError(.badServerResponse)
+        }
+    }
+
+    // MARK: - Tournaments
+
+    /// Fetch the tournament list, oldest first.
+    static func fetchTournaments() async throws -> [Tournament] {
+        let request = try await authorizedRequest(url: try url(path: "/api/tournaments"))
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse,
+              (200...299).contains(http.statusCode) else {
+            throw URLError(.badServerResponse)
+        }
+        return try JSONDecoder().decode([Tournament].self, from: data)
+    }
+
+    struct SaveTournamentsResponse: Decodable {
+        let success: Bool
+        let tournaments: [Tournament]
+    }
+
+    /// Replace the tournament list (admin). Returns the list as the server now
+    /// has it.
+    static func saveTournaments(_ tournaments: [Tournament]) async throws -> [Tournament] {
+        var request = try await authorizedRequest(url: try url(path: "/api/tournaments"), method: "PUT")
+        request.httpBody = try JSONEncoder().encode(tournaments)
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse,
+              (200...299).contains(http.statusCode) else {
+            let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+            throw serverError(data, status: status, fallback: "Could not save tournaments")
+        }
+        return try JSONDecoder().decode(SaveTournamentsResponse.self, from: data).tournaments
+    }
+
+    /// Move a game already on the server into a tournament, or back to league
+    /// play with an empty id. Sending the game again cannot do the second:
+    /// see `GamePayload.tournamentId`.
+    static func setGameTournament(gameId: String, tournamentId: String) async throws {
+        guard let encoded = gameId.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) else {
+            throw URLError(.badURL)
+        }
+        var request = try await authorizedRequest(url: try url(path: "/api/game/\(encoded)/tournament"), method: "PUT")
+        // An explicit null is what takes a game out of its tournament.
+        var body: [String: Any] = ["tournamentId": NSNull()]
+        if !tournamentId.isEmpty {
+            body["tournamentId"] = tournamentId
+        }
+        request.httpBody = try JSONSerialization.data(withJSONObject: body)
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse,
+              (200...299).contains(http.statusCode) else {
+            let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+            throw serverError(data, status: status, fallback: "Could not change the tournament")
         }
     }
 
@@ -866,6 +928,8 @@ enum APIClient {
         /// Nil on entries that predate the field; only an explicit `false` is
         /// an away game.
         let isHome: Bool?
+        /// Set on tournament bouts. A game started from one inherits it.
+        let tournamentId: String?
 
         /// "vs Opponent" at home, "@ Opponent" on the road.
         var matchupTitle: String {
@@ -888,6 +952,7 @@ enum APIClient {
         let location: String
         let time: String
         let isHome: Bool?
+        let tournamentId: String?
     }
 
     struct AddScheduleResponse: Decodable {
@@ -907,10 +972,10 @@ enum APIClient {
         return try JSONDecoder().decode([ScheduleEntry].self, from: data)
     }
 
-    static func addScheduleEntry(date: String, opponent: String, location: String, time: String, isHome: Bool? = nil) async throws -> ScheduleEntry {
+    static func addScheduleEntry(date: String, opponent: String, location: String, time: String, isHome: Bool? = nil, tournamentId: String? = nil) async throws -> ScheduleEntry {
         var request = try await authorizedRequest(url: try url(path: "/api/schedule"), method: "POST")
 
-        let payload = ScheduleEntryPayload(date: date, opponent: opponent, location: location, time: time, isHome: isHome)
+        let payload = ScheduleEntryPayload(date: date, opponent: opponent, location: location, time: time, isHome: isHome, tournamentId: tournamentId)
         request.httpBody = try JSONEncoder().encode(payload)
 
         let (data, response) = try await URLSession.shared.data(for: request)
@@ -993,6 +1058,7 @@ enum APIClient {
     struct GameResponse: Decodable {
         let gameId: String?
         let scheduleId: String?
+        let tournamentId: String?
         let date: String
         let opponent: String
         let location: String?
@@ -1006,8 +1072,8 @@ enum APIClient {
 
     /// Fetch games from the server. The server defaults to the current season,
     /// so a sync that reconciles the whole local store must ask for `.all`.
-    /// Regular-season and playoff games both come back; `/api/games` never
-    /// filters by type unless asked.
+    /// Regular-season, playoff and tournament games all come back;
+    /// `/api/games` never filters by type unless asked.
     static func fetchGames(season: SeasonQuery = .current) async throws -> [GameResponse] {
         let request = try await authorizedRequest(url: try url(path: "/api/games", season: season))
 

@@ -5,6 +5,7 @@ struct RosterView: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(AuthManager.self) private var authManager
     @Environment(SeasonStore.self) private var seasonStore
+    @Environment(TournamentStore.self) private var tournamentStore
     @Query(sort: \Player.number) private var players: [Player]
 
     @State private var showingAddPlayer = false
@@ -21,9 +22,14 @@ struct RosterView: View {
     }
 
     /// Everyone who has ever played stays in the local store; this narrows to
-    /// the season being viewed, the same way the site's roster page does.
+    /// the season or the tournament being viewed, the same way the site's
+    /// roster page does.
     private var visiblePlayers: [Player] {
         if selectedSeasonId == Season.allId { return players }
+        if Tournament.tournamentId(fromSelection: selectedSeasonId) != nil {
+            guard let tournament = tournamentStore.tournament(forSelection: selectedSeasonId) else { return [] }
+            return players.filter { tournament.isOnRoster($0) }
+        }
         return players.filter { $0.isMember(of: selectedSeasonId) }
     }
 
@@ -104,7 +110,9 @@ struct RosterView: View {
             await syncFromServer()
         }
         .refreshable {
-            await syncFromServer()
+            async let roster: () = syncFromServer()
+            async let tournaments: () = tournamentStore.load()
+            _ = await (roster, tournaments)
         }
     }
 
