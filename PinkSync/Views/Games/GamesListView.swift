@@ -364,6 +364,7 @@ struct GamesListView: View {
         }
 
         LiveSessionStore.delete(gameId: game.gameId)
+        APIClient.takeDownLiveScore(for: game.gameId)
         modelContext.delete(game)
         try? modelContext.save()
     }
@@ -449,6 +450,7 @@ struct GamesListView: View {
             for local in games {
                 if !local.gameId.isEmpty && local.isSynced && !local.hasLocalEdits && !serverIds.contains(local.gameId) {
                     LiveSessionStore.delete(gameId: local.gameId)
+                    APIClient.takeDownLiveScore(for: local.gameId)
                     modelContext.delete(local)
                 }
             }

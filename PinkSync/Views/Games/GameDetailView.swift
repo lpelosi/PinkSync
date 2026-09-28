@@ -630,6 +630,7 @@ struct GameDetailView: View {
             }
         }
         LiveSessionStore.delete(gameId: game.gameId)
+        APIClient.takeDownLiveScore(for: game.gameId)
         modelContext.delete(game)
         try? modelContext.save()
         isResetting = false
