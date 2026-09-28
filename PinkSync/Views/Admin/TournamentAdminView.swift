@@ -120,6 +120,8 @@ struct TournamentDraft: Identifiable {
     let url: String?
     /// Player ids, upper-cased the way the server stores them.
     var roster: Set<String>
+    /// Who wears a letter, by player id. Only players on the roster.
+    var letters: [String: Letter]
 
     init(tournament: Tournament) {
         id = tournament.id
@@ -131,6 +133,36 @@ struct TournamentDraft: Identifiable {
         division = tournament.division ?? ""
         url = tournament.url
         roster = Set((tournament.roster ?? []).map { $0.uppercased() })
+        var letters: [String: Letter] = [:]
+        for playerId in tournament.alternates ?? [] {
+            letters[playerId.uppercased()] = .alternate
+        }
+        if let captain = tournament.captain, !captain.isEmpty {
+            letters[captain.uppercased()] = .captain
+        }
+        self.letters = letters
+    }
+
+    /// Give a player a letter, or take it away with nil. There is one
+    /// captain: naming a new one takes the C from whoever had it.
+    mutating func setLetter(_ letter: Letter?, for playerId: String) {
+        if letter == .captain {
+            for (other, held) in letters where held == .captain {
+                letters[other] = nil
+            }
+        }
+        letters[playerId] = letter
+    }
+
+    /// Take a player off the roster or put them on it. Leaving the roster
+    /// gives up the letter.
+    mutating func toggleRoster(_ playerId: String) {
+        if roster.contains(playerId) {
+            roster.remove(playerId)
+            letters[playerId] = nil
+        } else {
+            roster.insert(playerId)
+        }
     }
 
     /// A new tournament over the coming weekend.
@@ -151,6 +183,7 @@ struct TournamentDraft: Identifiable {
         division = ""
         url = nil
         roster = []
+        letters = [:]
     }
 
     /// A URL-safe id from the label and the year, unique among `existing`.
@@ -174,6 +207,8 @@ struct TournamentDraft: Identifiable {
     func tournament(existing: [Tournament]) -> Tournament {
         let trimmedLocation = location.trimmingCharacters(in: .whitespaces)
         let trimmedDivision = division.trimmingCharacters(in: .whitespaces)
+        let worn = letters.filter { roster.contains($0.key) }
+        let alternates = worn.filter { $0.value == .alternate }.keys.sorted()
         return Tournament(
             id: resolvedId(existing: existing),
             label: label.trimmingCharacters(in: .whitespaces),
@@ -182,7 +217,9 @@ struct TournamentDraft: Identifiable {
             location: trimmedLocation.isEmpty ? nil : trimmedLocation,
             division: trimmedDivision.isEmpty ? nil : trimmedDivision,
             url: url,
-            roster: roster.isEmpty ? nil : roster.sorted()
+            roster: roster.isEmpty ? nil : roster.sorted(),
+            captain: worn.first { $0.value == .captain }?.key,
+            alternates: alternates.isEmpty ? nil : alternates
         )
     }
 }
@@ -232,34 +269,40 @@ private struct TournamentFormView: View {
             Section {
                 Button("Select the Season Roster") {
                     draft.roster = seasonRosterIds
+                    draft.letters = draft.letters.filter { seasonRosterIds.contains($0.key) }
                 }
                 Button("Clear", role: .destructive) {
                     draft.roster.removeAll()
+                    draft.letters.removeAll()
                 }
                 .disabled(draft.roster.isEmpty)
 
                 ForEach(candidates) { player in
                     let playerId = player.playerId.uppercased()
-                    Button {
-                        if draft.roster.contains(playerId) {
-                            draft.roster.remove(playerId)
-                        } else {
-                            draft.roster.insert(playerId)
+                    let travelling = draft.roster.contains(playerId)
+                    HStack {
+                        Button {
+                            draft.toggleRoster(playerId)
+                        } label: {
+                            HStack {
+                                Image(systemName: travelling ? "checkmark.circle.fill" : "circle")
+                                    .foregroundStyle(travelling ? AnyShapeStyle(AppTheme.pink) : AnyShapeStyle(.tertiary))
+                                PlayerRow(player: player)
+                            }
                         }
-                    } label: {
-                        HStack {
-                            PlayerRow(player: player)
-                            Spacer()
-                            Image(systemName: draft.roster.contains(playerId) ? "checkmark.circle.fill" : "circle")
-                                .foregroundStyle(draft.roster.contains(playerId) ? AnyShapeStyle(AppTheme.pink) : AnyShapeStyle(.tertiary))
+                        .buttonStyle(.plain)
+
+                        Spacer()
+
+                        if travelling {
+                            letterMenu(for: playerId, name: player.name)
                         }
                     }
-                    .tint(.primary)
                 }
             } header: {
                 Text("Travel Roster (\(draft.roster.count))")
             } footer: {
-                Text("Only these players are offered for the tournament's lineups, and only they appear on its roster and stats pages. A pickup has to be added on the Roster tab first. With nobody selected, the roster is whoever plays.")
+                Text("Only these players are offered for the tournament's lineups, and only they appear on its roster and stats pages. A pickup has to be added on the Roster tab first. With nobody selected, the roster is whoever plays.\n\nTap the letter next to a travelling player to name the captain (C) and the alternates (A). They are kept for this tournament only.")
             }
 
             if !draft.isNew {
@@ -292,6 +335,32 @@ private struct TournamentFormView: View {
             Button("Cancel", role: .cancel) {}
             Button("Delete", role: .destructive) { Task { await delete() } }
         }
+    }
+
+    /// C, A or no letter for one travelling player.
+    private func letterMenu(for playerId: String, name: String) -> some View {
+        let held = draft.letters[playerId]
+        return Menu {
+            ForEach(Letter.allCases) { letter in
+                Button {
+                    draft.setLetter(letter, for: playerId)
+                } label: {
+                    if held == letter {
+                        Label(letter.label, systemImage: "checkmark")
+                    } else {
+                        Text(letter.label)
+                    }
+                }
+            }
+            if held != nil {
+                Button("No Letter", role: .destructive) {
+                    draft.setLetter(nil, for: playerId)
+                }
+            }
+        } label: {
+            LetterBadge(letter: held)
+        }
+        .accessibilityLabel(held.map { "\(name), \($0.label). Change letter." } ?? "\(name), no letter. Give a letter.")
     }
 
     private func save() async {

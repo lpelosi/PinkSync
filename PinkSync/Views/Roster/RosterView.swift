@@ -37,6 +37,21 @@ struct RosterView: View {
         visiblePlayers.filter { !$0.isGoalie }
     }
 
+    /// A roster row, with the player's letter when a tournament is being
+    /// viewed. Letters are per tournament, so a season roster shows none.
+    @ViewBuilder
+    private func row(_ player: Player) -> some View {
+        if let letter = tournamentStore.tournament(forSelection: selectedSeasonId)?.letter(for: player) {
+            HStack {
+                PlayerRow(player: player)
+                Spacer()
+                LetterBadge(letter: letter)
+            }
+        } else {
+            PlayerRow(player: player)
+        }
+    }
+
     private var goalies: [Player] {
         visiblePlayers.filter { $0.isGoalie }
     }
@@ -79,7 +94,7 @@ struct RosterView: View {
             Section("Goalies") {
                 ForEach(goalies) { player in
                     NavigationLink(value: player) {
-                        PlayerRow(player: player)
+                        row(player)
                     }
                 }
             }
@@ -87,7 +102,7 @@ struct RosterView: View {
             Section("Skaters") {
                 ForEach(skaters) { player in
                     NavigationLink(value: player) {
-                        PlayerRow(player: player)
+                        row(player)
                     }
                 }
             }

@@ -120,6 +120,55 @@ final class TournamentTests: XCTestCase {
         XCTAssertNil(store.title(for: ""))
     }
 
+    func testLettersAreReadPerTournament() throws {
+        let container = try TestSupport.makeContainer()
+        let context = container.mainContext
+        let captain = TestSupport.player("Captain", number: 4, in: context)
+        let alternate = TestSupport.player("Alternate", number: 64, in: context)
+        let skater = TestSupport.player("Skater", number: 7, in: context)
+
+        var lettered = classic
+        lettered.captain = captain.playerId.lowercased()
+        lettered.alternates = [alternate.playerId]
+
+        XCTAssertEqual(lettered.letter(for: captain), .captain)
+        XCTAssertEqual(lettered.letter(for: alternate), .alternate)
+        XCTAssertNil(lettered.letter(for: skater))
+        XCTAssertNil(classic.letter(for: captain), "another tournament, another set of letters")
+    }
+
+    func testTheDraftKeepsOneCaptainAndOnlyTravellingLetters() {
+        var stored = classic
+        stored.roster = ["AAA", "BBB", "CCC"]
+        stored.captain = "aaa"
+        stored.alternates = ["BBB"]
+        var draft = TournamentDraft(tournament: stored)
+        XCTAssertEqual(draft.letters, ["AAA": .captain, "BBB": .alternate])
+
+        // Naming a new captain takes the C from the old one.
+        draft.setLetter(.captain, for: "CCC")
+        XCTAssertEqual(draft.letters, ["BBB": .alternate, "CCC": .captain])
+
+        // Leaving the roster gives up the letter.
+        draft.toggleRoster("BBB")
+        let saved = draft.tournament(existing: [stored])
+        XCTAssertEqual(saved.roster, ["AAA", "CCC"])
+        XCTAssertEqual(saved.captain, "CCC")
+        XCTAssertNil(saved.alternates)
+        XCTAssertEqual(saved.id, classic.id)
+    }
+
+    func testLettersSurviveARoundTrip() throws {
+        var stored = classic
+        stored.roster = ["AAA", "BBB"]
+        stored.captain = "AAA"
+        stored.alternates = ["BBB"]
+
+        let decoded = try JSONDecoder().decode(Tournament.self, from: JSONEncoder().encode(stored))
+        XCTAssertEqual(decoded.captain, "AAA")
+        XCTAssertEqual(decoded.alternates, ["BBB"])
+    }
+
     func testABoutIsOnlyHiddenByItsOwnGame() {
         func bout(_ id: String, _ date: String, _ opponent: String) -> APIClient.ScheduleEntry {
             APIClient.ScheduleEntry(id: id, date: date, opponent: opponent, location: "BIG 1", time: "", isHome: nil, tournamentId: classic.id)

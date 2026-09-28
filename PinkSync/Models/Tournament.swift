@@ -20,6 +20,10 @@ struct Tournament: Codable, Identifiable, Hashable, Sendable {
     var url: String?
     /// Player ids of the travel roster. Nil or empty until one is entered.
     var roster: [String]?
+    /// Player id of the captain for this tournament.
+    var captain: String?
+    /// Player ids of the alternate captains for this tournament.
+    var alternates: [String]?
 
     /// Added by the server on read (`upcoming`, `in-progress`, `complete`);
     /// ignored by it on write.
@@ -52,6 +56,38 @@ struct Tournament: Codable, Identifiable, Hashable, Sendable {
         }
         return player.gameStats.contains { $0.game?.tournamentId == id }
             || player.goalieGameStats.contains { $0.game?.tournamentId == id }
+    }
+}
+
+// MARK: - Letters
+
+/// The letter a captain or an alternate wears. Named per tournament, so each
+/// trip keeps its own record of who led the team.
+enum Letter: String, CaseIterable, Identifiable, Sendable {
+    case captain = "C"
+    case alternate = "A"
+
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .captain: "Captain"
+        case .alternate: "Alternate"
+        }
+    }
+}
+
+extension Tournament {
+    func letter(for player: Player) -> Letter? {
+        letter(forPlayerId: player.playerId)
+    }
+
+    func letter(forPlayerId playerId: String) -> Letter? {
+        let id = playerId.uppercased()
+        guard !id.isEmpty else { return nil }
+        if captain?.uppercased() == id { return .captain }
+        if (alternates ?? []).contains(where: { $0.uppercased() == id }) { return .alternate }
+        return nil
     }
 }
 
