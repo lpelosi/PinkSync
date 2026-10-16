@@ -370,6 +370,8 @@ enum APIClient {
         let timeOnIce: Int?
         let plusMinus: Int?
         let shifts: [ShiftPayload]?
+        /// Sent only when true; the server stores the stat line as given.
+        let wasDrinking: Bool?
     }
 
     struct GoalieStatPayload: Encodable {
@@ -380,6 +382,7 @@ enum APIClient {
         let goalsAgainst: Int
         let result: String
         let shootoutRounds: [ShootoutRoundPayload]
+        let wasDrinking: Bool?
     }
 
     struct ShootoutRoundPayload: Encodable {
@@ -451,7 +454,8 @@ enum APIClient {
                 faceoffLosses: stat.faceoffLosses,
                 timeOnIce: stat.timeOnIce > 0 ? stat.timeOnIce : nil,
                 plusMinus: stat.plusMinus != 0 ? stat.plusMinus : nil,
-                shifts: shiftPayloads
+                shifts: shiftPayloads,
+                wasDrinking: stat.wasDrinking ? true : nil
             )
         }
 
@@ -493,7 +497,8 @@ enum APIClient {
                 shotsAgainst: stat.shotsAgainst,
                 goalsAgainst: stat.goalsAgainst,
                 result: getsDecision ? gameResult : "",
-                shootoutRounds: rounds
+                shootoutRounds: rounds,
+                wasDrinking: stat.wasDrinking ? true : nil
             )
         }
 
@@ -1107,6 +1112,7 @@ enum APIClient {
         let timeOnIce: Int?
         let plusMinus: Int?
         let shifts: [ShiftResponse]?
+        let wasDrinking: Bool?
     }
 
     struct ShootoutRoundResponse: Decodable {
@@ -1122,6 +1128,7 @@ enum APIClient {
         let goalsAgainst: Int
         let result: String
         let shootoutRounds: [ShootoutRoundResponse]?
+        let wasDrinking: Bool?
     }
 
     struct GameResponse: Decodable {

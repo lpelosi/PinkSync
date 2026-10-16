@@ -24,6 +24,11 @@ final class GamePlayerStats {
     /// substitute player is assigned a borrowed number for the night.
     var gameJerseyNumber: Int? = nil
 
+    /// Beer league: whether this player was drinking before or during this
+    /// game. Set by the scorekeeper on the lineup, in Edit Stats or from the
+    /// live Lineup sheet. Default false allows lightweight SwiftData migration.
+    var wasDrinking: Bool = false
+
     var player: Player?
     var game: Game?
 

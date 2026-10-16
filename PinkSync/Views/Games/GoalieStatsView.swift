@@ -11,6 +11,7 @@ struct GoalieStatsView: View {
     @State private var resolvedStats: GameGoalieStats?
     @State private var shotsAgainst: Int = 0
     @State private var goalsAgainst: Int = 0
+    @State private var wasDrinking: Bool = false
 
     private var saves: Int { shotsAgainst - goalsAgainst }
     private var savePercentage: Double {
@@ -90,6 +91,15 @@ struct GoalieStatsView: View {
                     ShootoutView(goalieStats: gs)
                         .padding(.horizontal)
                 }
+
+                Toggle(isOn: $wasDrinking) {
+                    Label("Drinking this game", systemImage: "mug.fill")
+                        .font(.headline)
+                }
+                .tint(AppTheme.beer)
+                .padding()
+                .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 12))
+                .padding(.horizontal)
             }
         }
         .navigationTitle(player.name)
@@ -105,6 +115,7 @@ struct GoalieStatsView: View {
             resolvedStats = existing
             shotsAgainst = existing.shotsAgainst
             goalsAgainst = existing.goalsAgainst
+            wasDrinking = existing.wasDrinking
         } else {
             let someoneDecided = game.goalieStats.contains { !$0.result.isEmpty }
             let newStats = GameGoalieStats(
@@ -122,11 +133,13 @@ struct GoalieStatsView: View {
 
     private func saveStats() {
         guard let resolvedStats else { return }
-        if resolvedStats.shotsAgainst != shotsAgainst || resolvedStats.goalsAgainst != goalsAgainst {
+        if resolvedStats.shotsAgainst != shotsAgainst || resolvedStats.goalsAgainst != goalsAgainst
+            || resolvedStats.wasDrinking != wasDrinking {
             game.hasLocalEdits = true
         }
         resolvedStats.shotsAgainst = shotsAgainst
         resolvedStats.goalsAgainst = goalsAgainst
+        resolvedStats.wasDrinking = wasDrinking
         // Keep the line in step with a corrected game result, but only for the
         // goalie who has the decision. With a relief goalie, the other line
         // stays "no decision" — opening their card must not change that.

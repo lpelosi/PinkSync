@@ -289,6 +289,9 @@ struct GameSummaryView: View {
                     .foregroundStyle(AppTheme.pink)
                 Text(goalie.name)
                     .font(.headline)
+                if goalieStatsList.first(where: { $0.player?.persistentModelID == goalie.persistentModelID })?.wasDrinking == true {
+                    DrinkingBadge(compact: true)
+                }
             }
 
             if let gs = goalieStatsList.first(where: {
@@ -351,9 +354,17 @@ struct GameSummaryView: View {
                             HStack(spacing: 0) {
                                 Text(player.jerseyText)
                                     .frame(width: 30, alignment: .leading)
-                                Text(player.name)
-                                    .lineLimit(1)
-                                    .frame(width: 140, alignment: .leading)
+                                HStack(spacing: 4) {
+                                    Text(player.name)
+                                        .lineLimit(1)
+                                    if stat.wasDrinking {
+                                        Image(systemName: "mug.fill")
+                                            .font(.system(size: 9, weight: .bold))
+                                            .foregroundStyle(AppTheme.beer)
+                                            .accessibilityLabel("Drinking")
+                                    }
+                                }
+                                .frame(width: 140, alignment: .leading)
                                 Text(stat.timeOnIce > 0 ? formatTOI(stat.timeOnIce) : "-").frame(width: 36)
                                 if authManager.canManageGames {
                                     Text(stat.plusMinus > 0 ? "+\(stat.plusMinus)" : "\(stat.plusMinus)").frame(width: 30)

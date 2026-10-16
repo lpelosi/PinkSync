@@ -553,6 +553,7 @@ struct GamesListView: View {
                 timeOnIce: remoteStat.timeOnIce ?? 0,
                 plusMinus: remoteStat.plusMinus ?? 0
             )
+            stat.wasDrinking = remoteStat.wasDrinking ?? false
             stat.player = findPlayer(remoteStat.playerId, number: remoteStat.playerNumber, playerById: playerById, playerByNumber: playerByNumber)
             game.playerStats.append(stat)
             modelContext.insert(stat)
@@ -583,6 +584,7 @@ struct GamesListView: View {
                 goalsAgainst: remoteStat.goalsAgainst,
                 result: remoteStat.result
             )
+            stat.wasDrinking = remoteStat.wasDrinking ?? false
             stat.player = findPlayer(remoteStat.playerId, number: remoteStat.playerNumber, playerById: playerById, playerByNumber: playerByNumber)
             game.goalieStats.append(stat)
             modelContext.insert(stat)

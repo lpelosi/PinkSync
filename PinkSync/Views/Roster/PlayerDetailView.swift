@@ -64,6 +64,7 @@ struct PlayerDetailView: View {
                     statRow("Goals Against", value: "\(totals.totalGoalsAgainst)")
                     statRow("GAA", value: String(format: "%.2f", totals.goalsAgainstAverage))
                     statRow("SV%", value: String(format: "%.3f", totals.savePercentage))
+                    statRow("Games Drinking", value: "\(totals.goalieGamesDrinking)")
                 }
             }
 
@@ -81,6 +82,7 @@ struct PlayerDetailView: View {
                 statRow("Hits", value: "\(totals.totalHits)")
                 statRow("Blocks", value: "\(totals.totalBlocks)")
                 statRow("PIM", value: "\(totals.totalPenaltyMinutes)")
+                statRow("Games Drinking", value: "\(totals.skaterGamesDrinking)")
             }
 
             if totals.totalFaceoffWins + totals.totalFaceoffLosses > 0 {

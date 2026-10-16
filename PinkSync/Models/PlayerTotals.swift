@@ -80,6 +80,14 @@ struct PlayerTotals {
         goalieGameStats.filter { $0.result == GameResult.overtimeLoss.rawValue }.count
     }
 
+    // MARK: - Beer league
+
+    /// Games this player was flagged as drinking, skating or in goal.
+    /// App-only: the website never shows it.
+    var gamesDrinking: Int { skaterGamesDrinking + goalieGamesDrinking }
+    var skaterGamesDrinking: Int { gameStats.filter(\.wasDrinking).count }
+    var goalieGamesDrinking: Int { goalieGameStats.filter(\.wasDrinking).count }
+
     /// True when there is anything at all to show for this scope.
     var hasAppearances: Bool { gamesPlayed > 0 }
 }

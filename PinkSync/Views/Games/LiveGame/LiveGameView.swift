@@ -2139,6 +2139,28 @@ private struct OnIceManagerSheet: View {
             }
 
             VStack(alignment: .leading, spacing: 8) {
+                Text("DRINKING TONIGHT")
+                    .font(AppTheme.statLabel)
+                    .foregroundStyle(.secondary)
+                Text("Beer league. Flag anyone who had a few before or during the game.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                ForEach([vm.activeGoalie].compactMap { $0 } + vm.skaters) { player in
+                    Toggle(isOn: Binding(
+                        get: { vm.isDrinking(player) },
+                        set: { vm.setDrinking(player, $0) }
+                    )) {
+                        HStack(spacing: 6) {
+                            Text("\(vm.displayNumber(for: player)) \(player.name)")
+                                .font(.subheadline.weight(.semibold))
+                            if vm.isDrinking(player) { DrinkingBadge(compact: true) }
+                        }
+                    }
+                    .tint(AppTheme.beer)
+                }
+            }
+
+            VStack(alignment: .leading, spacing: 8) {
                 Text("ADD TO LINEUP")
                     .font(AppTheme.statLabel)
                     .foregroundStyle(.secondary)

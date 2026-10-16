@@ -119,6 +119,8 @@ struct PlayerStatsEditRow: View {
             statStepper("PIM", value: $stats.penaltyMinutes)
             statStepper("FO Wins", value: $stats.faceoffWins)
             statStepper("FO Losses", value: $stats.faceoffLosses)
+            Toggle("Drinking this game", isOn: $stats.wasDrinking)
+                .tint(AppTheme.beer)
         } label: {
             HStack(spacing: 8) {
                 Text(player.displayNumber)
@@ -127,6 +129,7 @@ struct PlayerStatsEditRow: View {
                     .frame(width: 30)
                 Text(player.name)
                     .font(.subheadline.bold())
+                if stats.wasDrinking { DrinkingBadge(compact: true) }
                 Spacer()
                 statBadges
             }
@@ -177,6 +180,8 @@ struct GoalieStatsEditRow: View {
                     Text(result.displayName).tag(result.rawValue)
                 }
             }
+            Toggle("Drinking this game", isOn: $stats.wasDrinking)
+                .tint(AppTheme.beer)
         } label: {
             HStack(spacing: 8) {
                 Text(player.displayNumber)
@@ -185,6 +190,7 @@ struct GoalieStatsEditRow: View {
                     .frame(width: 30)
                 Text(player.name)
                     .font(.subheadline.bold())
+                if stats.wasDrinking { DrinkingBadge(compact: true) }
                 Spacer()
                 HStack(spacing: 4) {
                     if stats.shotsAgainst > 0 {

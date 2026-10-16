@@ -171,6 +171,9 @@ struct GameDetailView: View {
                     } label: {
                         HStack {
                             PlayerRow(player: goalie)
+                            if goalieStats(for: goalie)?.wasDrinking == true {
+                                DrinkingBadge(compact: true)
+                            }
                             Spacer()
                             if goalieStats(for: goalie) != nil {
                                 Image(systemName: "checkmark.circle.fill")
@@ -263,6 +266,9 @@ struct GameDetailView: View {
                         } label: {
                             HStack {
                                 PlayerRow(player: player)
+                                if stats?.wasDrinking == true {
+                                    DrinkingBadge(compact: true)
+                                }
                                 if stats?.hasRecordedStats == true {
                                     Spacer()
                                     Image(systemName: "checkmark.circle.fill")
@@ -692,6 +698,9 @@ struct GameLineupPickerView: View {
     @State private var jerseyInput: String = ""
     @State private var showingAddSub = false
 
+    /// Players flagged as drinking tonight. Applied with the lineup on Done.
+    @State private var drinkingIds: Set<PersistentIdentifier> = []
+
     private var skaters: [Player] {
         allPlayers.sorted { a, b in
             // 1) Effective tonight-number ascending (subs/no-number to the end)
@@ -740,7 +749,7 @@ struct GameLineupPickerView: View {
                 }
                 .padding(.horizontal)
 
-                Text("Tap a player to add to the lineup. Tap the # badge on a tile to set a per-game jersey number.")
+                Text("Tap a player to add to the lineup. Tap the # badge on a tile to set a per-game jersey number. Press and hold to mark who is drinking tonight.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .padding(.horizontal)
@@ -772,11 +781,13 @@ struct GameLineupPickerView: View {
             selectedIds = Set(
                 game.playerStats.compactMap { $0.player?.persistentModelID }
             )
-            // Hydrate jersey overrides from existing GamePlayerStats
+            // Hydrate jersey overrides and drinking flags from existing GamePlayerStats
             for stat in game.playerStats {
-                if let id = stat.player?.persistentModelID, let override = stat.gameJerseyNumber {
+                guard let id = stat.player?.persistentModelID else { continue }
+                if let override = stat.gameJerseyNumber {
                     jerseyOverrides[id] = override
                 }
+                if stat.wasDrinking { drinkingIds.insert(id) }
             }
         }
         .alert("Set Jersey for Tonight", isPresented: Binding(
@@ -825,6 +836,7 @@ struct GameLineupPickerView: View {
         let id = player.persistentModelID
         let isSelected = selectedIds.contains(id)
         let override = jerseyOverrides[id]
+        let isDrinking = drinkingIds.contains(id)
         let displayNumber: String = {
             if let override {
                 return override == 0 ? "00" : "\(override)"
@@ -858,6 +870,12 @@ struct GameLineupPickerView: View {
             .frame(maxWidth: .infinity)
             .frame(height: 80)
             .background(isSelected ? AppTheme.pink : Color(.systemGray5), in: RoundedRectangle(cornerRadius: 12))
+            .overlay(alignment: .topLeading) {
+                if isDrinking {
+                    DrinkingBadge(compact: true)
+                        .padding(4)
+                }
+            }
             .overlay(alignment: .topTrailing) {
                 Button {
                     jerseyEditingPlayer = player
@@ -874,6 +892,16 @@ struct GameLineupPickerView: View {
             }
         }
         .contextMenu {
+            Button {
+                if isDrinking {
+                    drinkingIds.remove(id)
+                } else {
+                    drinkingIds.insert(id)
+                    selectedIds.insert(id)
+                }
+            } label: {
+                Label(isDrinking ? "Not Drinking Tonight" : "Drinking Tonight", systemImage: "mug.fill")
+            }
             Button {
                 jerseyEditingPlayer = player
                 jerseyInput = override.map { "\($0)" } ?? ""
@@ -898,11 +926,13 @@ struct GameLineupPickerView: View {
             let id = player.persistentModelID
             if let existing = game.playerStats.first(where: { $0.player?.persistentModelID == id }) {
                 existing.gameJerseyNumber = jerseyOverrides[id]
+                existing.wasDrinking = drinkingIds.contains(id)
             } else if !currentIds.contains(id) {
                 let stats = GamePlayerStats()
                 stats.player = player
                 stats.game = game
                 stats.gameJerseyNumber = jerseyOverrides[id]
+                stats.wasDrinking = drinkingIds.contains(id)
                 modelContext.insert(stats)
             }
         }
@@ -1065,6 +1095,9 @@ private struct GoLiveConfirmView: View {
                                     .padding(.horizontal, 4)
                                     .padding(.vertical, 1)
                                     .background(AppTheme.teal, in: Capsule())
+                            }
+                            if stat.wasDrinking {
+                                DrinkingBadge(compact: true)
                             }
                             Spacer()
                         }

@@ -7,6 +7,10 @@ final class GameGoalieStats {
     var goalsAgainst: Int
     var result: String
 
+    /// Beer league: whether this goalie was drinking before or during this
+    /// game. Default false allows lightweight SwiftData migration.
+    var wasDrinking: Bool = false
+
     var player: Player?
     var game: Game?
 

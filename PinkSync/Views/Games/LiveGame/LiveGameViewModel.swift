@@ -258,6 +258,30 @@ final class LiveGameViewModel: Identifiable {
         fire()
     }
 
+    // MARK: - Drinking
+
+    /// Beer league: whether this player is flagged as drinking tonight. The
+    /// goalie in net is read from the goalie line, everyone else from the
+    /// skater line.
+    func isDrinking(_ player: Player) -> Bool {
+        let id = player.persistentModelID
+        if id == activeGoalie?.persistentModelID {
+            return game.goalieStats.first { $0.player?.persistentModelID == id }?.wasDrinking ?? false
+        }
+        return game.playerStats.first { $0.player?.persistentModelID == id }?.wasDrinking ?? false
+    }
+
+    func setDrinking(_ player: Player, _ drinking: Bool) {
+        guard isDrinking(player) != drinking else { return }
+        if player.persistentModelID == activeGoalie?.persistentModelID {
+            findOrCreateGoalieStats(for: player).wasDrinking = drinking
+        } else {
+            findOrCreatePlayerStats(for: player).wasDrinking = drinking
+        }
+        save()
+        fire()
+    }
+
     /// A player can leave the lineup only while nothing has been recorded for
     /// them, so no stat silently disappears with them.
     func canRemoveFromLineup(_ player: Player) -> Bool {

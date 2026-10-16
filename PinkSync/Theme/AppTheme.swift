@@ -4,6 +4,7 @@ enum AppTheme {
     // MARK: - Colors
     static let pink = Color(red: 1.0, green: 0.443, blue: 0.808)       // #FF71CE
     static let teal = Color(red: 0.004, green: 0.804, blue: 0.996)     // #01CDFE
+    static let beer = Color(red: 0.96, green: 0.65, blue: 0.14)        // #F5A623, drinking badge
     static let darkBg = Color(red: 0.02, green: 0.02, blue: 0.02)      // #050505
 
     static let increment = Color.green
