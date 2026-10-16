@@ -26,7 +26,7 @@ struct ScheduleFormView: View {
     }
 
     private var resolvedOpponent: String {
-        useCustomOpponent ? opponent : (selectedTeam?.name ?? "")
+        useCustomOpponent ? OpponentTeam.listedName(for: opponent) : (selectedTeam?.name ?? "")
     }
 
     var body: some View {
