@@ -131,6 +131,7 @@ PinkSync/
 - **TOI (Time On Ice)** — per-shift tracking synced to the game clock. Individual shifts are recorded with start/end clock times and duration. Total TOI and average shift length are computed per game.
 - **Per-shift tracking** — each player's shifts are stored as individual records with period, duration, and clock times. Shift data is sent to the server for future analytics.
 - **GWG** (Game Winning Goal) is auto-computed from event history
+- **Drinking flag** (beer league) — each skater and goalie line in a game carries a `wasDrinking` flag. Set it on the Set Lineup grid (press and hold a tile), in Edit Stats, on a player's stat card, or from the live game's Lineup & On Ice sheet. Flagged players show a small mug badge on the game screen, the Go Live check and the game summary. The flag is sent with the stat line and comes back on sync; the server stores it as given. The Stats tab and a player's detail page total it as games drinking (🍺 column). App-only: the website never displays it.
 - **PPA/SHA** (Power Play Assists / Short-Handed Assists) are auto-tracked during goal recording
 
 ### Schedule Integration

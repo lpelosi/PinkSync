@@ -190,6 +190,7 @@ struct StatsView: View {
             sortableHeader("FO%", width: 36, key: "FO%", isSkater: true)
             sortableHeader("SOG", width: 36, key: "SOG", isSkater: true)
             sortableHeader("PIM", width: 36, key: "PIM", isSkater: true)
+            sortableHeader("🍺", width: 30, key: "DRK", isSkater: true)
         }
         .font(.system(size: 11, weight: .bold))
         .foregroundStyle(.secondary)
@@ -215,6 +216,7 @@ struct StatsView: View {
             Text((totals.totalFaceoffWins + totals.totalFaceoffLosses) > 0 ? String(format: "%.0f", totals.faceoffPercentage) : "-").frame(width: 36)
             Text("\(totals.totalShots)").frame(width: 36)
             Text("\(totals.totalPenaltyMinutes)").frame(width: 36)
+            Text(totals.skaterGamesDrinking > 0 ? "\(totals.skaterGamesDrinking)" : "-").frame(width: 30)
         }
         .font(.system(size: 12, design: .monospaced))
     }
@@ -231,6 +233,7 @@ struct StatsView: View {
             sortableHeader("OTL", width: 32, key: "OTL", isSkater: false)
             sortableHeader("GAA", width: 40, key: "GAA", isSkater: false)
             sortableHeader("SV%", width: 44, key: "SV%", isSkater: false)
+            sortableHeader("🍺", width: 30, key: "DRK", isSkater: false)
         }
         .font(.system(size: 11, weight: .bold))
         .foregroundStyle(.secondary)
@@ -251,6 +254,7 @@ struct StatsView: View {
             Text("\(totals.overtimeLosses)").frame(width: 32)
             Text(totals.goalieGamesPlayed > 0 ? String(format: "%.2f", totals.goalsAgainstAverage) : "-").frame(width: 40)
             Text(totals.totalShotsAgainst > 0 ? String(format: "%.3f", totals.savePercentage) : "-").frame(width: 44)
+            Text(totals.goalieGamesDrinking > 0 ? "\(totals.goalieGamesDrinking)" : "-").frame(width: 30)
         }
         .font(.system(size: 12, design: .monospaced))
     }
@@ -281,6 +285,7 @@ struct StatsView: View {
             case "FO%": a.totals.faceoffPercentage > b.totals.faceoffPercentage
             case "SOG": a.totals.totalShots > b.totals.totalShots
             case "PIM": a.totals.totalPenaltyMinutes > b.totals.totalPenaltyMinutes
+            case "DRK": a.totals.skaterGamesDrinking > b.totals.skaterGamesDrinking
             default: a.totals.totalPoints > b.totals.totalPoints
             }
         }
@@ -296,6 +301,7 @@ struct StatsView: View {
             case "OTL": a.totals.overtimeLosses > b.totals.overtimeLosses
             case "GAA": a.totals.goalsAgainstAverage < b.totals.goalsAgainstAverage
             case "SV%": a.totals.savePercentage > b.totals.savePercentage
+            case "DRK": a.totals.goalieGamesDrinking > b.totals.goalieGamesDrinking
             default: a.totals.wins > b.totals.wins
             }
         }

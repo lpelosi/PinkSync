@@ -86,10 +86,10 @@ extension Game {
             [s.player?.playerId ?? "", "\(s.shots)", "\(s.goals)", "\(s.assists)", "\(s.hits)", "\(s.blocks)",
              "\(s.penaltyMinutes)", "\(s.powerPlayGoals)", "\(s.shortHandedGoals)", "\(s.powerPlayAssists)",
              "\(s.shortHandedAssists)", "\(s.gameWinningGoals)", "\(s.faceoffWins)", "\(s.faceoffLosses)",
-             "\(s.plusMinus)"].joined(separator: ":")
+             "\(s.plusMinus)", s.wasDrinking ? "D" : ""].joined(separator: ":")
         }
         let goalies = goalieStats.map { g in
-            [g.player?.playerId ?? "", "\(g.shotsAgainst)", "\(g.goalsAgainst)", g.result].joined(separator: ":")
+            [g.player?.playerId ?? "", "\(g.shotsAgainst)", "\(g.goalsAgainst)", g.result, g.wasDrinking ? "D" : ""].joined(separator: ":")
         }
         return (skaters.sorted() + ["|"] + goalies.sorted()).joined(separator: ";")
     }

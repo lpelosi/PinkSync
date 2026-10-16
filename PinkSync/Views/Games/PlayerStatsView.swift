@@ -15,6 +15,7 @@ struct PlayerStatsView: View {
     @State private var hits: Int = 0
     @State private var blocks: Int = 0
     @State private var penaltyMinutes: Int = 0
+    @State private var wasDrinking: Bool = false
 
     private var columns: [GridItem] {
         let count = sizeClass == .regular ? 3 : 2
@@ -44,11 +45,24 @@ struct PlayerStatsView: View {
                     StatButton(label: "PIM", value: $penaltyMinutes)
                 }
                 .padding(.horizontal)
+
+                drinkingToggle
+                    .padding(.horizontal)
             }
         }
         .navigationTitle(player.name)
         .onAppear { loadStats() }
         .onDisappear { saveStats() }
+    }
+
+    private var drinkingToggle: some View {
+        Toggle(isOn: $wasDrinking) {
+            Label("Drinking this game", systemImage: "mug.fill")
+                .font(.headline)
+        }
+        .tint(AppTheme.beer)
+        .padding()
+        .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 12))
     }
 
     private func loadStats() {
@@ -59,6 +73,7 @@ struct PlayerStatsView: View {
         hits = stats.hits
         blocks = stats.blocks
         penaltyMinutes = stats.penaltyMinutes
+        wasDrinking = stats.wasDrinking
     }
 
     private func saveStats() {
@@ -67,13 +82,15 @@ struct PlayerStatsView: View {
 
         if let stats {
             // Update existing
+            if stats.wasDrinking != wasDrinking { game.hasLocalEdits = true }
+            stats.wasDrinking = wasDrinking
             stats.shots = shots
             stats.goals = goals
             stats.assists = assists
             stats.hits = hits
             stats.blocks = blocks
             stats.penaltyMinutes = penaltyMinutes
-        } else if hasStats {
+        } else if hasStats || wasDrinking {
             // Create new
             let newStats = GamePlayerStats(
                 shots: shots,
@@ -83,6 +100,7 @@ struct PlayerStatsView: View {
                 blocks: blocks,
                 penaltyMinutes: penaltyMinutes
             )
+            newStats.wasDrinking = wasDrinking
             newStats.player = player
             newStats.game = game
             modelContext.insert(newStats)
