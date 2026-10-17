@@ -195,6 +195,33 @@ struct GameDetailView: View {
                 }
             }
 
+            // MARK: - Bench
+            Section("Bench") {
+                Toggle(isOn: Binding(
+                    get: { game.coachWasDrinking },
+                    set: { on in
+                        guard game.coachWasDrinking != on else { return }
+                        game.coachWasDrinking = on
+                        game.hasLocalEdits = true
+                        try? modelContext.save()
+                    }
+                )) {
+                    HStack(spacing: 10) {
+                        CachedPlayerPhoto(url: StaffMember.headCoach.photoURL)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(StaffMember.headCoach.name)
+                                .font(AppTheme.playerName)
+                            Text("\(StaffMember.headCoach.role) · drinking this game")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        if game.coachWasDrinking { DrinkingBadge(compact: true) }
+                    }
+                }
+                .tint(AppTheme.beer)
+                .disabled(!authManager.canManageGames)
+            }
+
             // MARK: - Go Live / Resume / Reopen
             if authManager.canManageGames {
                 if hasLiveSession && !game.isComplete {

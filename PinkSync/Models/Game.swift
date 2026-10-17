@@ -32,6 +32,12 @@ final class Game {
     /// send. Default false allows lightweight SwiftData migration.
     var hasLocalEdits: Bool = false
 
+    /// Beer league: whether the head coach was drinking during this game.
+    /// Staff have no stat line, so the flag sits on the game. Set on the game
+    /// screen or the live Lineup sheet. Default false allows lightweight
+    /// SwiftData migration.
+    var coachWasDrinking: Bool = false
+
     var team: Team?
     var startingGoalie: Player?
 

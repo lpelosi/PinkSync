@@ -2145,6 +2145,17 @@ private struct OnIceManagerSheet: View {
                 Text("Beer league. Flag anyone who had a few before or during the game.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                Toggle(isOn: Binding(
+                    get: { vm.coachIsDrinking },
+                    set: { vm.setCoachDrinking($0) }
+                )) {
+                    HStack(spacing: 6) {
+                        Text("Coach \(StaffMember.headCoach.name)")
+                            .font(.subheadline.weight(.semibold))
+                        if vm.coachIsDrinking { DrinkingBadge(compact: true) }
+                    }
+                }
+                .tint(AppTheme.beer)
                 ForEach([vm.activeGoalie].compactMap { $0 } + vm.skaters) { player in
                     Toggle(isOn: Binding(
                         get: { vm.isDrinking(player) },
