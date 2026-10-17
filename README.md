@@ -171,7 +171,7 @@ PinkSync/
 
 ### Tabs
 - **Games** — upcoming bouts, active games, create new games, live stat tracking
-- **Roster** — full team roster with player photos, add/edit/remove players, position management (C, LW, RW, LD, RD, Goalie)
+- **Roster** — full team roster with player photos, add/edit/remove players, position management (C, LW, RW, LD, RD, Goalie). A **Staff** section lists the bench staff (the head coach, hardcoded in `Models/Staff.swift` to match the site's `src/data/staff.ts`). The coach's page shows the team's record for the season, tournament or all-time view by NHL standings rules (shootout win is a win, OT or shootout loss is an OTL; a season is league play only), points %, goal differential, current streak, the lifetime record, and the beer-league split: games the coach was drinking (a `coachWasDrinking` flag on the game, set in the game's Bench section or the live Lineup sheet) and the record drinking vs. sober. App-only; the site shows the record but never the drinking flag.
 - **History** — completed games with team filter (logos in filter chips), tap for game summary
 - **Stats** — per-season aggregate tables for skaters and goalies with sortable columns (including jersey number), a regular season / playoffs / all games toggle, a **Pick specific games** filter within that season, and a link to Franchise Records. Players who also play goal appear in both tables. +/- column is visible only to admins.
 

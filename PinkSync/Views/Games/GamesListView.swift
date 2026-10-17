@@ -440,6 +440,7 @@ struct GamesListView: View {
                     newGame.gameId = remoteId
                     newGame.scheduleId = remote.scheduleId ?? ""
                     newGame.tournamentId = remote.tournamentId ?? ""
+                    newGame.coachWasDrinking = remote.coachWasDrinking ?? false
                     newGame.team = team
                     if let sg = remote.startingGoalie {
                         newGame.startingGoalie = findPlayer(sg.playerId, number: sg.playerNumber, playerById: playerById, playerByNumber: playerByNumber)
@@ -498,6 +499,7 @@ struct GamesListView: View {
         local.goalsFor = remote.goalsFor
         local.goalsAgainst = remote.goalsAgainst
         local.result = remote.result
+        local.coachWasDrinking = remote.coachWasDrinking ?? false
         local.isComplete = true
         local.isSynced = true
         if let sid = remote.scheduleId, !sid.isEmpty {

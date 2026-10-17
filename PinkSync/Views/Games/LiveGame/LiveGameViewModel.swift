@@ -282,6 +282,15 @@ final class LiveGameViewModel: Identifiable {
         fire()
     }
 
+    var coachIsDrinking: Bool { game.coachWasDrinking }
+
+    func setCoachDrinking(_ drinking: Bool) {
+        guard game.coachWasDrinking != drinking else { return }
+        game.coachWasDrinking = drinking
+        save()
+        fire()
+    }
+
     /// A player can leave the lineup only while nothing has been recorded for
     /// them, so no stat silently disappears with them.
     func canRemoveFromLineup(_ player: Player) -> Bool {

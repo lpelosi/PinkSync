@@ -319,6 +319,8 @@ enum APIClient {
         let playerStats: [PlayerStatPayload]
         let goalieStats: [GoalieStatPayload]
         let events: [EventPayload]
+        /// Sent only when true; the server stores the game as given.
+        let coachWasDrinking: Bool?
     }
 
     struct EventPayload: Encodable {
@@ -547,7 +549,8 @@ enum APIClient {
             startingGoalie: startingGoaliePayload,
             playerStats: playerPayloads,
             goalieStats: goaliePayloads,
-            events: eventPayloads
+            events: eventPayloads,
+            coachWasDrinking: game.coachWasDrinking ? true : nil
         )
 
         request.httpBody = try JSONEncoder().encode(payload)
@@ -1149,6 +1152,7 @@ enum APIClient {
         let startingGoalie: GameStartingGoalieResponse?
         let playerStats: [GamePlayerStatResponse]?
         let goalieStats: [GameGoalieStatResponse]?
+        let coachWasDrinking: Bool?
     }
 
     /// Fetch games from the server. The server defaults to the current season,

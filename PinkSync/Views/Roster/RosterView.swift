@@ -128,6 +128,17 @@ struct RosterView: View {
                     }
                 }
             }
+
+            // Bench staff, on every season and tournament, as on the site.
+            Section("Staff") {
+                ForEach(StaffMember.all) { member in
+                    NavigationLink {
+                        CoachDetailView(member: member, selection: selectedSeasonId)
+                    } label: {
+                        StaffRow(member: member)
+                    }
+                }
+            }
         }
         .toolbar {
             if authManager.canEditRoster {
